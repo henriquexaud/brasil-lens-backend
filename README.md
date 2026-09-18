@@ -46,7 +46,11 @@ Pronto:
 As migrations rodam sozinhas quando a API sobe, e o `--wait` só devolve o
 terminal quando ela está saudável — então a ingestão nunca encontra o schema pela
 metade. A ingestão é o único passo manual, de propósito: ela baixa os dados das
-APIs do IBGE, e é bom vê-la terminar. Rodá-la de novo é seguro (é idempotente).
+APIs do IBGE, e é bom vê-la terminar.
+
+Se ela terminar avisando que alguma etapa ficou `partial`, é instabilidade da
+rede do IBGE: rode o mesmo comando de novo. A ingestão é idempotente — o que já
+foi gravado não muda, e o que faltou entra.
 
 Para parar: `docker compose down` (mantém os dados) ou `docker compose down -v`
 (apaga também o banco).
@@ -81,7 +85,7 @@ Os mesmos comandos, mais curtos. Opcional — tudo acima funciona sem `make`.
 | `make down` | derruba os containers, preservando o banco |
 | `make dev` | sobe tudo com recarga automática da API (`uvicorn --reload`) |
 | `make logs` | acompanha os logs da API |
-| `make test` | 87 testes (unitários + integração com banco) |
+| `make test` | 91 testes (unitários + integração com banco) |
 | `make lint` / `make format` | ruff + ruff format + mypy / formatação |
 | `make check` | testes + lint — o que um CI checaria |
 | `make smoke` | exercita `GET`, `POST`, `PUT` e `DELETE` contra a API no ar |
@@ -245,9 +249,17 @@ são atualizados no lugar; anos novos entram como linhas novas.
 
 ### Falhas parciais
 
-Cada escopo (uma UF, um dataset) commita separadamente. Se 3 de 27 UFs falharem,
-as outras 24 permanecem gravadas e a execução termina com `status = 'partial'`,
-com os escopos falhos listados em `ingestion_runs.details`.
+Antes de desistir de uma requisição, o provider tenta de novo as falhas
+transitórias — queda de conexão, timeout, `429` e `5xx` — até 3 vezes, com espera
+crescente (2 s, 4 s). Não é hipotético: numa ingestão real, as UFs 42 e 43
+caíram com `Server disconnected without sending a response` e responderam na
+repetição. Erros definitivos (`404`, corpo que não é JSON) falham na hora.
+
+Se mesmo assim um escopo falhar, os outros não são perdidos: cada escopo (uma UF,
+um dataset) commita separadamente. Se 3 de 27 UFs falharem, as outras 24
+permanecem gravadas e a execução termina com `status = 'partial'`, com os escopos
+falhos listados em `ingestion_runs.details`. Rodar o job de novo completa o que
+faltou.
 
 ```bash
 make psql
@@ -587,7 +599,7 @@ o gargalo é rede, não CPU. O raciocínio e o gatilho para reavaliar isso estã
 
 ```bash
 make check   # testes + lint
-make test    # 87 testes
+make test    # 91 testes
 make lint    # ruff + ruff format + mypy
 make smoke   # GET/POST/PUT/DELETE contra a API no ar
 ```
