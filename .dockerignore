@@ -1,0 +1,26 @@
+# Caches e ambientes locais
+__pycache__
+*.py[cod]
+.venv
+venv
+.pytest_cache
+.ruff_cache
+.mypy_cache
+*.egg-info
+.cache
+
+# Configuração local — no container, a configuração vem do compose
+.env
+.env.*
+
+# O que não roda dentro da imagem
+.git
+.gitignore
+.dockerignore
+Dockerfile
+docker-compose*.yml
+Makefile
+README.md
+docs
+scripts
+.DS_Store

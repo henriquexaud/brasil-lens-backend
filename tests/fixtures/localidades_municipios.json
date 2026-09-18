@@ -1,0 +1,145 @@
+[
+ {
+  "id": 3100104,
+  "nome": "Abadia dos Dourados",
+  "microrregiao": {
+   "id": 31019,
+   "nome": "Patrocínio",
+   "mesorregiao": {
+    "id": 3105,
+    "nome": "Triângulo Mineiro/Alto Paranaíba",
+    "UF": {
+     "id": 31,
+     "sigla": "MG",
+     "nome": "Minas Gerais",
+     "regiao": {
+      "id": 3,
+      "sigla": "SE",
+      "nome": "Sudeste"
+     }
+    }
+   }
+  },
+  "regiao-imediata": {
+   "id": 310061,
+   "nome": "Monte Carmelo",
+   "regiao-intermediaria": {
+    "id": 3111,
+    "nome": "Uberlândia",
+    "UF": {
+     "id": 31,
+     "sigla": "MG",
+     "nome": "Minas Gerais",
+     "regiao": {
+      "id": 3,
+      "sigla": "SE",
+      "nome": "Sudeste"
+     }
+    }
+   }
+  }
+ },
+ {
+  "id": 3550308,
+  "nome": "São Paulo",
+  "microrregiao": {
+   "id": 35061,
+   "nome": "São Paulo",
+   "mesorregiao": {
+    "id": 3515,
+    "nome": "Metropolitana de São Paulo",
+    "UF": {
+     "id": 35,
+     "sigla": "SP",
+     "nome": "São Paulo",
+     "regiao": {
+      "id": 3,
+      "sigla": "SE",
+      "nome": "Sudeste"
+     }
+    }
+   }
+  },
+  "regiao-imediata": {
+   "id": 350001,
+   "nome": "São Paulo",
+   "regiao-intermediaria": {
+    "id": 3501,
+    "nome": "São Paulo",
+    "UF": {
+     "id": 35,
+     "sigla": "SP",
+     "nome": "São Paulo",
+     "regiao": {
+      "id": 3,
+      "sigla": "SE",
+      "nome": "Sudeste"
+     }
+    }
+   }
+  }
+ },
+ {
+  "id": 5101837,
+  "nome": "Boa Esperança do Norte",
+  "microrregiao": null,
+  "regiao-imediata": {
+   "id": 510008,
+   "nome": "Sorriso",
+   "regiao-intermediaria": {
+    "id": 5103,
+    "nome": "Sinop",
+    "UF": {
+     "id": 51,
+     "sigla": "MT",
+     "nome": "Mato Grosso",
+     "regiao": {
+      "id": 5,
+      "sigla": "CO",
+      "nome": "Centro-Oeste"
+     }
+    }
+   }
+  }
+ },
+ {
+  "id": 5300108,
+  "nome": "Brasília",
+  "microrregiao": {
+   "id": 53001,
+   "nome": "Brasília",
+   "mesorregiao": {
+    "id": 5301,
+    "nome": "Distrito Federal",
+    "UF": {
+     "id": 53,
+     "sigla": "DF",
+     "nome": "Distrito Federal",
+     "regiao": {
+      "id": 5,
+      "sigla": "CO",
+      "nome": "Centro-Oeste"
+     }
+    }
+   }
+  },
+  "regiao-imediata": {
+   "id": 530001,
+   "nome": "Distrito Federal",
+   "regiao-intermediaria": {
+    "id": 5301,
+    "nome": "Distrito Federal",
+    "UF": {
+     "id": 53,
+     "sigla": "DF",
+     "nome": "Distrito Federal",
+     "regiao": {
+      "id": 5,
+      "sigla": "CO",
+      "nome": "Centro-Oeste"
+     }
+    }
+   }
+  }
+ }
+]

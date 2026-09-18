@@ -1,0 +1,32 @@
+[
+ {
+  "id": 31,
+  "sigla": "MG",
+  "nome": "Minas Gerais",
+  "regiao": {
+   "id": 3,
+   "sigla": "SE",
+   "nome": "Sudeste"
+  }
+ },
+ {
+  "id": 35,
+  "sigla": "SP",
+  "nome": "São Paulo",
+  "regiao": {
+   "id": 3,
+   "sigla": "SE",
+   "nome": "Sudeste"
+  }
+ },
+ {
+  "id": 53,
+  "sigla": "DF",
+  "nome": "Distrito Federal",
+  "regiao": {
+   "id": 5,
+   "sigla": "CO",
+   "nome": "Centro-Oeste"
+  }
+ }
+]

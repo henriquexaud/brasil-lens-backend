@@ -1,0 +1,15 @@
+# ---------------------------------------------------------------------------
+# Sobreposição de desenvolvimento: recarga automática da API.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build --wait
+#   (ou simplesmente `make dev`)
+#
+# O código deste repositório é montado dentro do container, então editar um
+# arquivo recarrega a API (uvicorn --reload). O frontend, que vive no próprio
+# repositório, tem a sua recarga lá (`npm run dev`).
+# ---------------------------------------------------------------------------
+services:
+  api:
+    volumes:
+      - ./:/app
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"

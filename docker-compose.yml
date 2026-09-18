@@ -1,0 +1,84 @@
+# ---------------------------------------------------------------------------
+# Brasil Lens — aplicação completa a partir deste repositório.
+#
+#   db   PostgreSQL 16 + PostGIS 3.4
+#   api  FastAPI (imagem deste repositório); aplica as migrations ao subir
+#   web  React + nginx, construído direto do repositório do frontend
+#
+#   docker compose up --build --wait            → tudo
+#   docker compose up --build --wait db api     → só o backend
+#
+# O `web` não precisa de clone: o Compose aceita uma URL git como contexto de
+# build e baixa o frontend na hora. Para construir a partir de uma cópia local
+# (ex.: ao desenvolver os dois juntos), defina FRONTEND_CONTEXT no .env.
+# ---------------------------------------------------------------------------
+
+# Nome fixo: o volume do banco não muda se o repositório for clonado em uma
+# pasta com outro nome.
+name: brasil-lens
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-brasil_lens}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-brasil_lens}
+      POSTGRES_DB: ${POSTGRES_DB:-brasil_lens}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-brasil_lens} -d ${POSTGRES_DB:-brasil_lens}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-brasil_lens}:${POSTGRES_PASSWORD:-brasil_lens}@db:5432/${POSTGRES_DB:-brasil_lens}
+      APP_ENV: ${APP_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: ${LOG_FORMAT:-console}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+      READ_CACHE_TTL_SECONDS: ${READ_CACHE_TTL_SECONDS:-300}
+      READ_CACHE_MAX_FEATURES: ${READ_CACHE_MAX_FEATURES:-200}
+      HTTP_CACHE_MAX_AGE: ${HTTP_CACHE_MAX_AGE:-300}
+      IBGE_BASE_URL: ${IBGE_BASE_URL:-https://servicodados.ibge.gov.br}
+      IBGE_HTTP_TIMEOUT: ${IBGE_HTTP_TIMEOUT:-120}
+      IBGE_MAX_CONCURRENCY: ${IBGE_MAX_CONCURRENCY:-4}
+      GEOMETRY_OVERVIEW_TOLERANCE: ${GEOMETRY_OVERVIEW_TOLERANCE:-0.02}
+      GEOMETRY_DETAIL_TOLERANCE: ${GEOMETRY_DETAIL_TOLERANCE:-0.002}
+    # As migrations rodam antes do servidor: um banco novo já sobe com o schema,
+    # e quem avalia não precisa lembrar de um passo a mais. Em banco atualizado,
+    # `alembic upgrade head` não faz nada.
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "${API_PORT:-8000}:8000"
+    # É este healthcheck que o `--wait` espera: ele só passa depois das
+    # migrations, então nenhum comando seguinte encontra o schema pela metade.
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health').status == 200 else 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  web:
+    build:
+      context: ${FRONTEND_CONTEXT:-https://github.com/henriquexaud/brasil-lens-frontend.git#main}
+      args:
+        # Assado no bundle: é a URL que o *browser* usa, não a da rede interna
+        # do compose — por isso "localhost" e não "api".
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000/api/v1}
+    depends_on:
+      - api
+    ports:
+      - "${WEB_PORT:-5173}:80"
+
+volumes:
+  pgdata:
