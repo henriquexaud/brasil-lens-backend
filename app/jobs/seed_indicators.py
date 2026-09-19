@@ -234,6 +234,22 @@ CATALOG: tuple[IndicatorSeed, ...] = (
         decimal_places=1,
         display_order=70,
     ),
+    # --- Clima e meio ambiente ----------------------------------------------
+    IndicatorSeed(
+        key="disaster_affected_people",
+        name="Pessoas afetadas por desastres",
+        unit="people/100k",
+        description=(
+            "Mortes, desaparecidos e pessoas diretamente afetadas por desastres "
+            "naturais, por 100 mil habitantes — Indicador ODS 11.5.1 (também "
+            "vale para 1.5.1 e 13.1.1). Não existe abertura municipal na fonte: "
+            "a tabela do IBGE só publica Brasil, região e UF."
+        ),
+        origin=IndicatorOrigin.SOURCED,
+        decimal_places=1,
+        display_order=100,
+        context=DataContext.CLIMATE_ENVIRONMENTAL,
+    ),
 )
 
 

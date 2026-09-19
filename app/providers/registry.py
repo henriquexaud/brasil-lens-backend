@@ -17,11 +17,11 @@ from app.models import DataContext
 from app.providers import ibge
 from app.providers.descriptor import ProviderDescriptor
 
-# Um provider por linha. `climate_environmental` e `biodiversity` ainda não
-# têm nenhum: os contextos já existem (ver app/models/context.py) e já
-# aparecem em `/contexts` com zero providers — prontos para receber o
-# primeiro, sem migration nem mudança de contrato.
-PROVIDERS: tuple[ProviderDescriptor, ...] = (ibge.PROVIDER,)
+# Um provider por linha. `biodiversity` ainda não tem nenhum: o contexto já
+# existe (ver app/models/context.py) e já aparece em `/contexts` com zero
+# providers — pronto para receber o primeiro, sem migration nem mudança de
+# contrato. `climate_environmental` ganhou o seu primeiro em PROVIDER_CLIMATE.
+PROVIDERS: tuple[ProviderDescriptor, ...] = (ibge.PROVIDER, ibge.PROVIDER_CLIMATE)
 
 
 def providers_by_context(context: DataContext) -> tuple[ProviderDescriptor, ...]:
