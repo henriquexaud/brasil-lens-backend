@@ -822,3 +822,102 @@ hierarquia declaradas ao lado dele (`REQUIRES_PARENT` e `EXPECTED_PARENT_LEVEL`,
 `app/models/territory.py`) e a ingestão. Modelo, mapa, visualizações salvas e API já
 são genéricos por nível — `/map` e `/views` leem a mesma hierarquia, em vez de cada
 serviço manter a sua.
+
+---
+
+## 10. Contextos de dados e registro de providers
+
+Revisão de arquitetura, motivada por um objetivo concreto: preparar o backend
+para agrupar indicadores em **contextos temáticos** (sociopolítico, clima e
+meio ambiente, biodiversidade) que o frontend possa um dia selecionar em vez
+de carregar tudo de uma vez — sem transformar o projeto em plugin system nem
+microserviços. Nada foi reescrito; o §8.3 já havia avaliado o acoplamento para
+"camadas temáticas" e concluído **livre** (uma coluna + filtro opcional). Esta
+fase implementa exatamente isso, e corrige dois acoplamentos reais que
+existiam mesmo com essa avaliação favorável.
+
+### 10.1 O que já estava certo
+
+A separação `providers/` → `jobs/` → `repositories/` → `services/` → `api/`
+(§2) e a fronteira `TerritoryRecord`/`GeometryRecord`/`IndicatorObservation`
+(§9) já eram exatamente o desenho pedido para "contexto/domínio → serviço →
+provider/adaptador → cliente HTTP, com contratos claros". Não havia nada para
+inventar aqui — só nomear e destravar.
+
+### 10.2 Dois acoplamentos reais, corrigidos
+
+| Acoplamento | Sintoma | Correção |
+|---|---|---|
+| `providers/ibge/records.py` guardava `TerritoryRecord`/`GeometryRecord`/`IndicatorObservation` — os tipos que o próprio código já chamava de "a fronteira do sistema" — dentro do pacote de **uma** fonte. | Um provider novo (INMET, GBIF) importaria `from app.providers.ibge.records import ...`: a fronteira genérica vivia dentro do pacote de um concorrente dela. | Movidos para `app/providers/records.py`, ao lado de `base.py`. Nenhuma mudança de tipo — só de endereço. |
+| `services/derived.py` (regra de negócio genérica: razão, crescimento, participação) importava `RatioIndicatorSpec` e companhia de `app.providers.ibge.datasets`. | Um `service/` — camada que "não conhece HTTP nem a fonte" por definição (§2) — dependia do pacote de um provider específico para tipos que não têm nada de IBGE (operam só sobre `indicator_values`). | As três specs de derivação migraram para `app/providers/specs.py`. `ibge/datasets.py` as importa de lá, como qualquer outro provider importaria. `services/derived.py` não conhece mais `ibge`. |
+| `providers/base.py:http_client()` fixava `timeout=settings.ibge_http_timeout` incondicionalmente, mesmo aceitando `base_url` de qualquer fonte. | Um provider novo com `base_url` próprio herdaria em silêncio o timeout calibrado para malhas municipais de 8,8 MB — sem relação com a latência de outra API. | `http_client()` ganhou um parâmetro `timeout` opcional. Sem argumentos, comportamento idêntico ao de hoje (todo call site atual não passa nenhum dos dois). |
+
+Nenhuma dessas correções mudou uma linha de SQL, uma rota ou um teste
+existente — são movimentações de tipo e um parâmetro opcional.
+
+### 10.3 O que é novo
+
+**`DataContext`** (`app/models/context.py`): enum `sociopolitical` |
+`climate_environmental` | `biodiversity`. Coluna `indicators.context`,
+`NOT NULL DEFAULT 'sociopolitical'` (migration `0003_indicator_context`) — os
+14 indicadores existentes são retrocompatíveis por definição, sem `UPDATE`.
+Filtro opcional `context` em `GET /indicators` e `GET /indicators/{key}`
+(mesmo padrão de `level`: omitido, devolve o catálogo inteiro — o
+comportamento de hoje).
+
+**Registro de providers** (`app/providers/registry.py` +
+`app/providers/descriptor.py`): não é descoberta dinâmica — é uma tupla.
+Cada provider expõe seu próprio `PROVIDER: ProviderDescriptor` (contexto +
+quais `indicator.key` ele fornece); o registro só agrega. `GET /contexts`
+expõe isso: para cada contexto, seus providers e quantos indicadores cada um
+declara fornecer. É metadado sobre a *capacidade* do backend, por isso não
+toca o banco.
+
+**`climate_environmental` e `biodiversity` já existem** no enum e já
+aparecem em `/contexts`, com zero providers registrados — prontos para
+receber o primeiro sem migration nem mudança de contrato. Ver §11 para a
+receita de como isso seria feito.
+
+### 10.4 O que foi deliberadamente deixado para depois
+
+O modelo territorial (`territories`, `indicator_values`) continua assumindo
+que todo valor pertence a um território do IBGE — o que é correto para
+sociopolítico e para uma boa fatia de clima/biodiversidade recortada por UF ou
+município. A ressalva do §8.3 (dados que nascem em estação ou grade, não em
+polígono territorial — típico de clima global) **continua de pé e sem
+implementação**: construir a tabela de observações não-territoriais agora,
+sem uma fonte concreta puxando por ela, seria especular. O caminho já está
+descrito lá; esta fase não precisou tocá-lo porque nenhum provider novo foi
+adicionado de verdade — só o lugar para ele chegar.
+
+---
+
+## 11. Como adicionar um contexto ou provider novo
+
+Mecânico, porque é composição do que já existe:
+
+1. Se o contexto ainda não existe, um valor novo em `DataContext`
+   (`app/models/context.py`) + entrada em `DATA_CONTEXT_INFO` + migration
+   (mesmo padrão de `0003_indicator_context`). `climate_environmental` e
+   `biodiversity` já existem — normalmente este passo nem é necessário.
+2. Um pacote `app/providers/<fonte>/` com um cliente HTTP (reaproveitando
+   `providers/base.py`: retry, backoff, `ProviderError`, `http_client(...)`
+   com `base_url`/`timeout` próprios) que devolve `IndicatorObservation` —
+   importado de `app.providers.records`, nunca de dentro de outro provider.
+3. Se algum indicador for derivado dos que a fonte traz, as specs vêm de
+   `app.providers.specs` — as mesmas que o IBGE usa.
+4. Um `PROVIDER = ProviderDescriptor(...)` no `__init__.py` do pacote, com o
+   `context` certo e as `indicator.key` que ele fornece. Uma linha nova em
+   `PROVIDERS`, em `app/providers/registry.py`.
+5. As entradas de indicador em `app/jobs/seed_indicators.py`, com
+   `context=DataContext.X` (só quem não é sociopolítico precisa declarar —
+   é o único valor sem default).
+6. Um job de ingestão (`app/jobs/import_<fonte>.py`), no mesmo formato de
+   `import_indicators.py`: consultar → validar → normalizar → persistir com
+   `ON CONFLICT DO UPDATE` → registrar em `ingestion_runs`. Não entra em
+   `bootstrap.py` por padrão — é uma etapa independente, como todas.
+
+Nenhum desses seis passos toca `repositories/`, `services/map.py`,
+`services/territories.py`, os schemas de mapa/overview ou qualquer rota
+existente — eles já são genéricos por indicador, não por fonte. O único
+código realmente novo é o provider em si.

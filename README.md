@@ -389,7 +389,8 @@ Base: `/api/v1`. Erros usam um envelope único, incluindo os 422 de validação:
 | Método | Rota | Uso |
 |---|---|---|
 | `GET` | `/health`, `/health/ready` | liveness e readiness (banco + PostGIS) |
-| `GET` | `/indicators?level=` | catálogo + anos com dado |
+| `GET` | `/contexts` | contextos de dados (sociopolítico, clima/ambiente, biodiversidade) e providers registrados em cada um |
+| `GET` | `/indicators?level=&context=` | catálogo + anos com dado |
 | `GET` | `/indicators/{key}` | um indicador |
 | `GET` | `/territories?level=&parent=&search=&limit=&offset=` | listagens |
 | `GET` | `/territories/{ibge_code}` | território, pai, capital, bbox |
@@ -683,12 +684,25 @@ denominador de referência mais recente até o ano; o crescimento compara com o 
 anterior *com dado* e anualiza o intervalo; a participação exige o total nacional
 do mesmo ano.
 
-### Adicionar uma fonte nova (SICONFI, IPEA, DataSUS, INEP)
+### Adicionar uma fonte nova (SICONFI, IPEA, DataSUS, INEP, INMET, GBIF...)
 
-Um módulo em `app/providers/<fonte>/` que devolva
-`IndicatorObservation`, um `dataset` novo e um job (ou um parâmetro no job
-existente). **Modelo, schema e API não mudam** — é para isso que
-`IndicatorObservation` existe como fronteira.
+Um módulo em `app/providers/<fonte>/` que devolva `IndicatorObservation`
+(de `app.providers.records` — a fronteira, compartilhada por qualquer fonte),
+um `dataset` novo, um `PROVIDER: ProviderDescriptor` registrado em
+`app/providers/registry.py` (contexto + indicadores que a fonte fornece) e um
+job (ou um parâmetro no job existente). **Modelo, schema e API não mudam** —
+é para isso que `IndicatorObservation` existe como fronteira. Detalhe da
+receita, com os dois acoplamentos que foram corrigidos para viabilizá-la, em
+[docs/ARCHITECTURE.md §10-11](docs/ARCHITECTURE.md#10-contextos-de-dados-e-registro-de-providers).
+
+### Contextos de dados
+
+Cada indicador pertence a um `DataContext` (`sociopolitical`,
+`climate_environmental` ou `biodiversity` — ver `app/models/context.py`).
+`GET /contexts` lista os contextos e os providers registrados em cada um;
+`GET /indicators?context=` filtra o catálogo por contexto. Os dois novos
+contextos já existem e já respondem em `/contexts`, sem nenhum provider
+registrado ainda — prontos para receber o primeiro sem migration.
 
 ### Adicionar um nível territorial
 
@@ -715,11 +729,12 @@ app/
   api/v1/                 rotas HTTP, validação de entrada, cabeçalhos de cache
   core/                   configuração, logging, erros, cache
   db/                     engine, sessão, base declarativa
-  models/                 SQLAlchemy 2.0 (e a forma da hierarquia territorial)
+  models/                 SQLAlchemy 2.0 (hierarquia territorial, contextos de dados)
   schemas/                Pydantic v2 (contratos da API)
   repositories/           SQL e PostGIS
   services/               latest, classificação, derivação, overview, visualizações
-  providers/ibge/         comunicação com as fontes externas
+  providers/              records.py (fronteira comum), specs.py (derivação),
+                          registry.py (providers por contexto), ibge/ (fonte IBGE)
   jobs/                   orquestração da ingestão
 tests/                    unitários + integração (fixtures de respostas reais do IBGE)
 scripts/smoke_crud.sh     verificação GET/POST/PUT/DELETE de ponta a ponta

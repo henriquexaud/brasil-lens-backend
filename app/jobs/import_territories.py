@@ -27,7 +27,7 @@ from app.jobs._runner import RunReport, job_session, run_job, upsert_dataset
 from app.models import Territory, TerritoryLevel
 from app.providers.base import http_client
 from app.providers.ibge import localidades
-from app.providers.ibge.records import TerritoryRecord
+from app.providers.records import TerritoryRecord
 from app.providers.ibge.reference import COUNTRY_CAPITAL, STATE_CAPITALS
 
 logger = get_logger(__name__)

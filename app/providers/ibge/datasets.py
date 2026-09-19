@@ -14,7 +14,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
-# Níveis do IBGE que o produto consome hoje.
+from app.providers.specs import (
+    DerivedIndicatorSpec,
+    GrowthIndicatorSpec,
+    RatioIndicatorSpec,
+    ShareIndicatorSpec,
+)
+
+# Níveis do IBGE (nomenclatura da API de Agregados/SIDRA) que o produto
+# consome hoje. Especificamente do IBGE — por isso ficam aqui, e não em
+# `providers/specs.py`: outra fonte não tem "N1"/"N6", tem a própria sintaxe
+# de recorte territorial.
 NATIONAL_LEVELS: tuple[str, ...] = ("N1", "N2", "N3")  # Brasil, região, UF
 MUNICIPAL_LEVEL = "N6"
 
@@ -66,8 +76,10 @@ class SourcedIndicatorSpec:
 # ---------------------------------------------------------------------------
 # Indicadores derivados.
 #
-# São três formas de derivação, e cada uma existe porque um indicador pedido
-# não existe na fonte nessa forma. Todas rodam na ingestão, em um único comando
+# São três formas de derivação (`RatioIndicatorSpec`, `GrowthIndicatorSpec`,
+# `ShareIndicatorSpec`, importadas de `app.providers.specs` — não são
+# específicas do IBGE), e cada uma existe porque um indicador pedido não
+# existe na fonte nessa forma. Todas rodam na ingestão, em um único comando
 # SQL — a razão está em docs/ARCHITECTURE.md §6: mantém um único caminho de
 # leitura, permite índice sobre o resultado e concentra a regra temporal em um
 # lugar só.
@@ -76,73 +88,6 @@ class SourcedIndicatorSpec:
 #   crescimento A(t)/A(t-1) crescimento populacional
 #   participação A ÷ A(Brasil) participação no PIB nacional
 # ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True, slots=True)
-class RatioIndicatorSpec:
-    """Razão entre dois indicadores no mesmo território (A ÷ B × fator)."""
-
-    indicator_key: str
-    numerator_key: str
-    denominator_key: str
-    dataset_name: str
-    factor: Decimal = Decimal(1)
-    notes: str = ""
-
-    @property
-    def dataset_code(self) -> str:
-        return f"derived/{self.indicator_key}"
-
-    @property
-    def dependencies(self) -> tuple[str, ...]:
-        return (self.numerator_key, self.denominator_key)
-
-
-@dataclass(frozen=True, slots=True)
-class GrowthIndicatorSpec:
-    """Variação anual de um indicador em relação ao ano anterior com dado.
-
-    A taxa é **geométrica anualizada**: a cobertura da população é irregular
-    (não há 2007, 2010, 2022 nem 2023 nas estimativas), e uma diferença simples
-    entre 2021 e 2024 devolveria o crescimento de três anos rotulado como se
-    fosse de um.
-    """
-
-    indicator_key: str
-    base_key: str
-    dataset_name: str
-    factor: Decimal = Decimal(100)
-    notes: str = ""
-
-    @property
-    def dataset_code(self) -> str:
-        return f"derived/{self.indicator_key}"
-
-    @property
-    def dependencies(self) -> tuple[str, ...]:
-        return (self.base_key,)
-
-
-@dataclass(frozen=True, slots=True)
-class ShareIndicatorSpec:
-    """Participação do território no total nacional do mesmo indicador e ano."""
-
-    indicator_key: str
-    base_key: str
-    dataset_name: str
-    factor: Decimal = Decimal(100)
-    notes: str = ""
-
-    @property
-    def dataset_code(self) -> str:
-        return f"derived/{self.indicator_key}"
-
-    @property
-    def dependencies(self) -> tuple[str, ...]:
-        return (self.base_key,)
-
-
-DerivedIndicatorSpec = RatioIndicatorSpec | GrowthIndicatorSpec | ShareIndicatorSpec
 
 
 # ---------------------------------------------------------------------------
@@ -333,6 +278,29 @@ SOURCED_INDICATORS: tuple[SourcedIndicatorSpec, ...] = (
             "(ela é calculada sobre a amostra anual). Verificado em 2024: "
             "oficial 6,6%, média dos trimestres 6,85%. A trimestral continua "
             "cobrindo o ano em curso, que a tabela anual ainda não publicou."
+        ),
+    ),
+    # --- Clima e meio ambiente ----------------------------------------------
+    # Primeiro indicador do contexto `climate_environmental` (ver
+    # app/providers/ibge/__init__.py: PROVIDER_CLIMATE). Mesma fonte (IBGE/
+    # SIDRA), mesmo mecanismo de ingestão — só o contexto do indicador muda.
+    SourcedIndicatorSpec(
+        indicator_key="disaster_affected_people",
+        table="6689",
+        variable="9619",
+        # Indicador ODS 11.5.1: a tabela só publica N1/N2/N3. Não existe
+        # abertura municipal na fonte — o recorte municipal simplesmente não
+        # nasce, como já acontece com renda e desemprego acima.
+        levels=NATIONAL_LEVELS,
+        dataset_name=(
+            "IBGE — Indicador ODS 11.5.1: mortes, desaparecidos e afetados por "
+            "desastres, por 100 mil habitantes (tabela 6689, v. 9619)"
+        ),
+        notes=(
+            "Série 2015-2024, cobertura completa nas 27 UFs (verificado: "
+            "N3[all] devolve as 27 séries para 2023). Também vale para os "
+            "indicadores ODS 1.5.1 e 13.1.1 — é a mesma métrica com três "
+            "numerações."
         ),
     ),
 )

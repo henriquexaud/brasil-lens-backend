@@ -2,11 +2,12 @@
 
 from fastapi import APIRouter
 
-from app.api.v1 import health, indicators, saved_views, territories
+from app.api.v1 import contexts, health, indicators, saved_views, territories
 from app.api.v1 import map as map_routes
 
 api_router = APIRouter()
 api_router.include_router(health.router)
+api_router.include_router(contexts.router)
 api_router.include_router(indicators.router)
 api_router.include_router(territories.router)
 api_router.include_router(map_routes.router)

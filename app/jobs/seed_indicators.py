@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.jobs._runner import job_session, run_job
-from app.models import Indicator, IndicatorOrigin
+from app.models import DataContext, Indicator, IndicatorOrigin
 
 logger = get_logger(__name__)
 
@@ -35,6 +35,9 @@ class IndicatorSeed:
     origin: IndicatorOrigin
     decimal_places: int
     display_order: int
+    # Todo indicador de hoje é sociopolítico — daí o default. Um indicador de
+    # outro contexto (clima, biodiversidade) declara o seu explicitamente.
+    context: DataContext = DataContext.SOCIOPOLITICAL
 
 
 CATALOG: tuple[IndicatorSeed, ...] = (
@@ -246,6 +249,7 @@ async def seed_catalog(session: AsyncSession) -> int:
                 description=seed.description,
                 unit=seed.unit,
                 origin=seed.origin,
+                context=seed.context,
                 decimal_places=seed.decimal_places,
                 display_order=seed.display_order,
             )
@@ -256,6 +260,7 @@ async def seed_catalog(session: AsyncSession) -> int:
                     "description": seed.description,
                     "unit": seed.unit,
                     "origin": seed.origin,
+                    "context": seed.context,
                     "decimal_places": seed.decimal_places,
                     "display_order": seed.display_order,
                     "updated_at": datetime.now(UTC),

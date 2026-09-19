@@ -8,7 +8,7 @@ from decimal import Decimal
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Indicator, IndicatorOrigin, TerritoryLevel
+from app.models import DataContext, Indicator, IndicatorOrigin, TerritoryLevel
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,6 +20,7 @@ class IndicatorCatalogRow:
     description: str | None
     unit: str
     origin: IndicatorOrigin
+    context: DataContext
     decimal_places: int
     display_order: int
     available_years: list[int]
@@ -62,13 +63,18 @@ class IndicatorValueRow:
 # O recorte por ano fica no FILTER, não no WHERE: se estivesse no WHERE, um
 # indicador sem nenhum valor no nível pedido desapareceria do catálogo em vez
 # de aparecer com cobertura vazia — e o seletor de indicador perderia a opção.
+#
+# `context` é filtro adicional, no mesmo padrão de `key`: comparação por texto
+# porque bind param de enum exigiria CAST explícito por dialect, e o valor já
+# chega validado (é o `.value` de `DataContext`).
 # ---------------------------------------------------------------------------
 _DEFINITIONS_SQL = text(
     """
     SELECT i.key, i.name, i.description, i.unit, i.origin::text AS origin,
-           i.decimal_places, i.display_order
+           i.context::text AS context, i.decimal_places, i.display_order
       FROM indicators i
      WHERE (CAST(:key AS text) IS NULL OR i.key = CAST(:key AS text))
+       AND (CAST(:context AS text) IS NULL OR i.context::text = CAST(:context AS text))
      ORDER BY i.display_order, i.key
     """
 )
@@ -81,7 +87,7 @@ _CATALOG_ANY_LEVEL_SQL = text(
          GROUP BY indicator_id, reference_year
     )
     SELECT i.key, i.name, i.description, i.unit, i.origin::text AS origin,
-           i.decimal_places, i.display_order,
+           i.context::text AS context, i.decimal_places, i.display_order,
            COALESCE(
                ARRAY_AGG(c.reference_year ORDER BY c.reference_year)
                    FILTER (WHERE c.reference_year IS NOT NULL),
@@ -90,7 +96,8 @@ _CATALOG_ANY_LEVEL_SQL = text(
       FROM indicators i
       LEFT JOIN coverage c ON c.indicator_id = i.id
      WHERE (CAST(:key AS text) IS NULL OR i.key = CAST(:key AS text))
-     GROUP BY i.id, i.key, i.name, i.description, i.unit, i.origin,
+       AND (CAST(:context AS text) IS NULL OR i.context::text = CAST(:context AS text))
+     GROUP BY i.id, i.key, i.name, i.description, i.unit, i.origin, i.context,
               i.decimal_places, i.display_order
      ORDER BY i.display_order, i.key
     """
@@ -106,7 +113,7 @@ _CATALOG_BY_LEVEL_SQL = text(
          GROUP BY v.indicator_id, v.reference_year
     )
     SELECT i.key, i.name, i.description, i.unit, i.origin::text AS origin,
-           i.decimal_places, i.display_order,
+           i.context::text AS context, i.decimal_places, i.display_order,
            COALESCE(
                ARRAY_AGG(c.reference_year ORDER BY c.reference_year)
                    FILTER (WHERE c.reference_year IS NOT NULL),
@@ -115,7 +122,8 @@ _CATALOG_BY_LEVEL_SQL = text(
       FROM indicators i
       LEFT JOIN coverage c ON c.indicator_id = i.id
      WHERE (CAST(:key AS text) IS NULL OR i.key = CAST(:key AS text))
-     GROUP BY i.id, i.key, i.name, i.description, i.unit, i.origin,
+       AND (CAST(:context AS text) IS NULL OR i.context::text = CAST(:context AS text))
+     GROUP BY i.id, i.key, i.name, i.description, i.unit, i.origin, i.context,
               i.decimal_places, i.display_order
      ORDER BY i.display_order, i.key
     """
@@ -129,6 +137,7 @@ def _to_catalog_row(row: object, *, years: list[int]) -> IndicatorCatalogRow:
         description=row.description,  # type: ignore[attr-defined]
         unit=row.unit,  # type: ignore[attr-defined]
         origin=IndicatorOrigin(row.origin),  # type: ignore[attr-defined]
+        context=DataContext(row.context),  # type: ignore[attr-defined]
         decimal_places=row.decimal_places,  # type: ignore[attr-defined]
         display_order=row.display_order,  # type: ignore[attr-defined]
         available_years=years,
@@ -139,9 +148,12 @@ async def list_definitions(
     session: AsyncSession,
     *,
     key: str | None = None,
+    context: DataContext | None = None,
 ) -> list[IndicatorCatalogRow]:
     """Apenas os metadados do indicador, sem cobertura temporal."""
-    result = await session.execute(_DEFINITIONS_SQL, {"key": key})
+    result = await session.execute(
+        _DEFINITIONS_SQL, {"key": key, "context": context.value if context else None}
+    )
     return [_to_catalog_row(row, years=[]) for row in result]
 
 
@@ -150,14 +162,16 @@ async def list_catalog(
     *,
     level: TerritoryLevel | None = None,
     key: str | None = None,
+    context: DataContext | None = None,
 ) -> list[IndicatorCatalogRow]:
     """Metadados + anos com dado. `level` restringe a cobertura ao nível exibido."""
+    context_value = context.value if context else None
     if level is None:
         statement = _CATALOG_ANY_LEVEL_SQL
-        params: dict[str, object] = {"key": key}
+        params: dict[str, object] = {"key": key, "context": context_value}
     else:
         statement = _CATALOG_BY_LEVEL_SQL
-        params = {"key": key, "level": level.value}
+        params = {"key": key, "context": context_value, "level": level.value}
 
     result = await session.execute(statement, params)
     return [_to_catalog_row(row, years=list(row.available_years or [])) for row in result]

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.models import IndicatorOrigin
+from app.models import DataContext, IndicatorOrigin
 from app.schemas.common import ApiDecimal, CamelModel
 
 
@@ -12,6 +12,10 @@ class IndicatorOut(CamelModel):
     description: str | None
     unit: str
     origin: IndicatorOrigin
+    # Agrupamento temático — ver `DataContext`. Hoje todo indicador é
+    # "sociopolitical"; o campo já sai no contrato para o futuro seletor de
+    # contexto do frontend filtrar sem adivinhar por `key`.
+    context: DataContext
     # Quantas casas decimais exibir. Metadado de formatação, não de aparência.
     decimal_places: int
     # Anos com dado, em ordem crescente. É o que popula o seletor de ano —

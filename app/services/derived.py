@@ -47,7 +47,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.db.results import affected_rows
-from app.providers.ibge.datasets import (
+from app.providers.specs import (
     DerivedIndicatorSpec,
     GrowthIndicatorSpec,
     RatioIndicatorSpec,

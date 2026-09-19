@@ -41,7 +41,7 @@ from app.core.logging import get_logger
 from app.models import TerritoryLevel
 from app.providers.base import get_json
 from app.providers.ibge.localidades import COUNTRY_CODE
-from app.providers.ibge.records import IndicatorObservation
+from app.providers.records import IndicatorObservation
 
 logger = get_logger(__name__)
 

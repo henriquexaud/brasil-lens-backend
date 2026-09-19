@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.cache import TTLCache
 from app.core.config import settings
 from app.core.errors import IndicatorNotFoundError
-from app.models import TerritoryLevel
+from app.models import DataContext, TerritoryLevel
 from app.repositories import indicators as indicators_repo
 from app.schemas.indicator import IndicatorListResponse, IndicatorOut
 
@@ -32,6 +32,7 @@ def _to_schema(row: indicators_repo.IndicatorCatalogRow) -> IndicatorOut:
         description=row.description,
         unit=row.unit,
         origin=row.origin,
+        context=row.context,
         decimal_places=row.decimal_places,
         available_years=row.available_years,
         latest_year=row.latest_year,
@@ -42,17 +43,22 @@ async def list_indicators(
     session: AsyncSession,
     *,
     level: TerritoryLevel | None = None,
+    context: DataContext | None = None,
 ) -> IndicatorListResponse:
     """Catálogo com cobertura temporal.
 
     `level` importa: a cobertura de um indicador pode diferir entre UF e
-    município, e é a cobertura do nível exibido que deve popular o seletor de ano.
+    município, e é a cobertura do nível exibido que deve popular o seletor de
+    ano. `context` restringe a um agrupamento temático (ver `DataContext`) —
+    hoje opcional e sem efeito para quem não o envia, para o futuro seletor de
+    contexto do frontend filtrar sem carregar o catálogo inteiro.
     """
-    cached = _catalog_cache.get(level)
+    cache_key = (level, context)
+    cached = _catalog_cache.get(cache_key)
     if cached is None:
-        rows = await indicators_repo.list_catalog(session, level=level)
+        rows = await indicators_repo.list_catalog(session, level=level, context=context)
         cached = [_to_schema(row) for row in rows]
-        _catalog_cache.set(level, cached)
+        _catalog_cache.set(cache_key, cached)
     return IndicatorListResponse(indicators=cached)
 
 
@@ -61,8 +67,9 @@ async def get_indicator(
     key: str,
     *,
     level: TerritoryLevel | None = None,
+    context: DataContext | None = None,
 ) -> IndicatorOut:
-    catalog = await list_indicators(session, level=level)
+    catalog = await list_indicators(session, level=level, context=context)
     for indicator in catalog.indicators:
         if indicator.key == key:
             return indicator

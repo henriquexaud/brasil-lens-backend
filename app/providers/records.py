@@ -1,8 +1,12 @@
-"""Tipos internos produzidos pelos providers.
+"""Tipos internos produzidos pelos providers — a fronteira do sistema.
 
-Esta é a fronteira do sistema: a partir daqui ninguém sabe se o dado veio do
-IBGE, do SICONFI ou de um CSV. Adicionar uma fonte nova significa produzir estes
-mesmos tipos — sem tocar em modelo, serviço ou API.
+Deliberadamente fora de `providers/ibge/`: são os tipos que **qualquer**
+provider, de qualquer contexto, produz para atravessar a fronteira com o
+domínio. A partir daqui ninguém sabe se o dado veio do IBGE, do SICONFI, do
+INMET ou de um CSV. Adicionar uma fonte nova significa produzir estes mesmos
+tipos — sem tocar em modelo, serviço ou API. Viver dentro de `ibge/` até agora
+era em si um acoplamento: um provider novo teria que importar de dentro do
+pacote de outra fonte para falar a mesma língua.
 """
 
 from __future__ import annotations

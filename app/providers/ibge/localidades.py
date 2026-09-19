@@ -19,7 +19,7 @@ from app.core.errors import ProviderError
 from app.core.logging import get_logger
 from app.models import TerritoryLevel
 from app.providers.base import get_json
-from app.providers.ibge.records import TerritoryRecord
+from app.providers.records import TerritoryRecord
 
 logger = get_logger(__name__)
 

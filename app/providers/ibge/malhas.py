@@ -24,7 +24,7 @@ import httpx
 from app.core.errors import ProviderError
 from app.core.logging import get_logger
 from app.providers.base import get_json
-from app.providers.ibge.records import GeometryRecord
+from app.providers.records import GeometryRecord
 
 logger = get_logger(__name__)
 

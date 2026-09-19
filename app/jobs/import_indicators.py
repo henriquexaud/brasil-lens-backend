@@ -53,7 +53,7 @@ from app.providers.ibge.datasets import (
     SOURCED_INDICATORS,
     SourcedIndicatorSpec,
 )
-from app.providers.ibge.records import IndicatorObservation
+from app.providers.records import IndicatorObservation
 from app.services.derived import derive
 
 logger = get_logger(__name__)

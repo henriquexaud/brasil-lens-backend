@@ -29,6 +29,13 @@ from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin
+from app.models.context import DataContext
+
+data_context_enum = Enum(
+    DataContext,
+    name="data_context",
+    values_callable=lambda enum_cls: [member.value for member in enum_cls],
+)
 
 
 class IndicatorOrigin(str, enum.Enum):
@@ -60,6 +67,14 @@ class Indicator(Base, TimestampMixin):
         nullable=False,
         default=IndicatorOrigin.SOURCED,
     )
+    # Agrupamento temático (sociopolítico, clima/ambiente, biodiversidade).
+    # Todo indicador de hoje é sociopolítico — o default cobre isso sem exigir
+    # que cada seed declare o óbvio. Ver app/models/context.py.
+    context: Mapped[DataContext] = mapped_column(
+        data_context_enum,
+        nullable=False,
+        default=DataContext.SOCIOPOLITICAL,
+    )
     # Metadado de formatação (quantas casas exibir), não de aparência/cor.
     decimal_places: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
     display_order: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=100)
@@ -68,6 +83,8 @@ class Indicator(Base, TimestampMixin):
         back_populates="indicator",
         cascade="all, delete-orphan",
     )
+
+    __table_args__ = (Index("ix_indicators_context", "context"),)
 
     def __repr__(self) -> str:  # pragma: no cover - diagnóstico
         return f"<Indicator {self.key}>"

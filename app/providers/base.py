@@ -32,10 +32,22 @@ _TRANSIENT_STATUS = frozenset({429, 500, 502, 503, 504})
 
 
 @asynccontextmanager
-async def http_client(base_url: str | None = None) -> AsyncIterator[httpx.AsyncClient]:
+async def http_client(
+    base_url: str | None = None,
+    *,
+    timeout: float | None = None,
+) -> AsyncIterator[httpx.AsyncClient]:
+    """Cliente HTTP com defaults do IBGE, sobrepostos por qualquer provider.
+
+    `base_url`/`timeout` ausentes preservam o comportamento de hoje (todo
+    provider fala com o IBGE). Um provider novo, de outra fonte, passa os dois
+    explicitamente — sem isso, ele herdaria silenciosamente o timeout
+    calibrado para as malhas municipais do IBGE, que não tem relação com a
+    latência de nenhuma outra API.
+    """
     async with httpx.AsyncClient(
         base_url=base_url or settings.ibge_base_url,
-        timeout=settings.ibge_http_timeout,
+        timeout=timeout if timeout is not None else settings.ibge_http_timeout,
         follow_redirects=True,
         headers={"Accept-Encoding": "gzip", "User-Agent": "brasil-lens/0.1 (ingestion)"},
     ) as client:

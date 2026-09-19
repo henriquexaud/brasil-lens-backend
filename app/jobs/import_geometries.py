@@ -46,7 +46,7 @@ from app.jobs._runner import RunReport, job_session, run_job, upsert_dataset
 from app.models import GeometryLOD, Territory, TerritoryLevel
 from app.providers.base import http_client
 from app.providers.ibge import malhas
-from app.providers.ibge.records import GeometryRecord
+from app.providers.records import GeometryRecord
 
 logger = get_logger(__name__)
 
