@@ -12,6 +12,13 @@ from app.models.territory import (
     TerritoryGeometry,
     TerritoryLevel,
 )
+from app.models.weather import (
+    WeatherAlert,
+    WeatherObservation,
+    WeatherProvider,
+    WeatherStation,
+    WeatherStationType,
+)
 
 __all__ = [
     "EXPECTED_PARENT_LEVEL",
@@ -28,4 +35,9 @@ __all__ = [
     "Territory",
     "TerritoryGeometry",
     "TerritoryLevel",
+    "WeatherAlert",
+    "WeatherObservation",
+    "WeatherProvider",
+    "WeatherStation",
+    "WeatherStationType",
 ]

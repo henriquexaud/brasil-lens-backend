@@ -43,6 +43,36 @@ class Settings(BaseSettings):
     ibge_http_timeout: float = 120.0
     ibge_max_concurrency: int = 4
 
+    # Clima — ver docs/ARCHITECTURE.md (contexto Clima) e app/providers/inmet/.
+    # Timeout menor que o do IBGE de propósito: são chamadas pequenas (uma
+    # estação, um payload de alertas), repetidas a cada ciclo do scheduler —
+    # não malhas municipais de dezenas de MB.
+    inmet_base_url: str = "https://apitempo.inmet.gov.br"
+    inmet_alerts_base_url: str = "https://apiprevmet3.inmet.gov.br"
+    inmet_http_timeout: float = 30.0
+    # Baixa de propósito: a série horária por estação (`/estacao/{...}`) tem
+    # *rate limit* agressivo — confirmado rodando o job real, que com
+    # concorrência 8 fez as 518 estações caírem em "Você atingiu o limite de
+    # requisições." (HTTP 200, texto plano, sem 429). Concorrência baixa +
+    # retentativa (ver app/providers/inmet/stations.py) é o que faz o ciclo
+    # completar sem depender de adivinhar o teto exato da fonte.
+    inmet_max_concurrency: int = 2
+    # Ainda não confirmada (ver app/providers/cemaden/) — placeholder até a
+    # verificação de endpoint ser concluída durante a implementação.
+    cemaden_base_url: str = ""
+    cemaden_http_timeout: float = 30.0
+
+    # Liga o laço asyncio de atualização periódica (app/jobs/weather_scheduler.py)
+    # no lifespan da API. Desligado em teste/CI por padrão via .env, para não
+    # depender de rede externa ao rodar a suíte.
+    weather_refresh_enabled: bool = True
+    weather_refresh_interval_seconds: int = 600
+    # TTL de resposta HTTP das rotas /weather/* — curto porque o dado já é
+    # barato de ler (vem do Postgres, não da fonte externa); só evita reler a
+    # cada poll do frontend durante picos de tráfego.
+    weather_stations_cache_ttl_seconds: int = 90
+    weather_alerts_cache_ttl_seconds: int = 90
+
     # Tolerâncias de ST_SimplifyPreserveTopology, em graus (SRID 4326).
     # 0.02° ~ 2 km: suficiente para o Brasil inteiro em zoom 4.
     geometry_overview_tolerance: float = 0.02

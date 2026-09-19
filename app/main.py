@@ -26,6 +26,7 @@ from app.core.config import settings
 from app.core.errors import DomainError, error_body
 from app.core.logging import configure_logging, get_logger
 from app.db.session import dispose_engine
+from app.jobs import weather_scheduler
 
 configure_logging()
 logger = get_logger(__name__)
@@ -34,7 +35,12 @@ logger = get_logger(__name__)
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     logger.info("api.startup", extra={"environment": settings.app_env})
+    # Atualização periódica das fontes climáticas — ver
+    # app/jobs/weather_scheduler.py sobre por que é um laço em processo e não
+    # um cron externo.
+    weather_scheduler.start()
     yield
+    await weather_scheduler.stop()
     await dispose_engine()
     logger.info("api.shutdown")
 

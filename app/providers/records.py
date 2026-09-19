@@ -11,11 +11,12 @@ pacote de outra fonte para falar a mesma língua.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from app.models import TerritoryLevel
+from app.models import TerritoryLevel, WeatherStationType
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,3 +49,50 @@ class IndicatorObservation:
     ibge_code: str
     reference_year: int
     value: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class WeatherStationRecord:
+    """Uma estação/pluviômetro, identificado na fonte — sem leitura ainda."""
+
+    provider: str
+    external_code: str
+    name: str
+    station_type: WeatherStationType
+    latitude: float
+    longitude: float
+    state_abbreviation: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class WeatherObservationRecord:
+    """Uma leitura de estação, já normalizada (sentinelas descartadas).
+
+    Todos os campos de medida são opcionais: uma estação de chuva do CEMADEN
+    só preenche `precipitation_mm`.
+    """
+
+    provider: str
+    external_code: str
+    observed_at: datetime
+    temperature_c: Decimal | None = None
+    humidity_pct: Decimal | None = None
+    pressure_hpa: Decimal | None = None
+    precipitation_mm: Decimal | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class WeatherAlertRecord:
+    """Um alerta georreferenciado, já normalizado."""
+
+    provider: str
+    external_id: str
+    event: str
+    severity: str
+    onset: datetime
+    expires: datetime
+    polygon_geojson: dict[str, Any]
+    color: str | None = None
+    affected_ibge_codes: tuple[str, ...] = field(default_factory=tuple)
+    risks: tuple[str, ...] = field(default_factory=tuple)
+    instructions: tuple[str, ...] = field(default_factory=tuple)
