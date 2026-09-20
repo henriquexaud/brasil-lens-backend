@@ -51,8 +51,8 @@ app = FastAPI(
     description=(
         "Dados territoriais, demográficos e econômicos do Brasil.\n\n"
         "Os dados são ingeridos de fontes públicas (IBGE) por jobs offline e "
-        "servidos a partir do PostgreSQL/PostGIS: nenhuma requisição desta API "
-        "depende da disponibilidade ou latência das fontes externas."
+        "servidos a partir do PostgreSQL/PostGIS. O clima atual e a previsão são "
+        "consultados na Open-Meteo, com cache e tratamento de indisponibilidade."
     ),
     default_response_class=ORJSONResponse,
     lifespan=lifespan,

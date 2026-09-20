@@ -921,3 +921,39 @@ Nenhum desses seis passos toca `repositories/`, `services/map.py`,
 `services/territories.py`, os schemas de mapa/overview ou qualquer rota
 existente — eles já são genéricos por indicador, não por fonte. O único
 código realmente novo é o provider em si.
+
+### Clima atual: navegação territorial e consulta pública
+
+O contexto climático reutiliza `/map` sem indicador, conservando as divisas,
+o recorte por UF, a busca e a seleção. Condições atuais não são médias dos
+polígonos: `/weather/current?territory=<IBGE>` usa a capital para estados e
+um ponto interno da malha para municípios. A interface explicita essa referência.
+Sem território selecionado, uma consulta em lote fornece as 27 capitais.
+
+A Open-Meteo é consultada sob demanda no backend, com cache de dez minutos,
+limite de 128 entradas e deduplicação de consultas simultâneas por chave. Essa rota é uma
+exceção à leitura exclusivamente offline dos indicadores IBGE. A resposta
+inclui fonte, horário e condição atual; `forecast=false` omite os três dias de
+previsão, que têm cache independente e são consultados ao expandir a seção. Falhas têm
+cooldown de um minuto; o último dado pode ser exibido como `stale` por até duas
+horas, conservando o horário original. Sem dado utilizável, retorna 502.
+
+Ao entrar em uma UF, o frontend prioriza a malha e então antecipa as condições
+atuais via `/weather/municipalities?parent=<UF>&offset=0&limit=40`. A paginação
+por código IBGE retorna `nextOffset`; cada lote usa uma requisição pública com
+múltiplos pontos internos da malha. As respostas alimentam o cache individual
+do backend e do React Query. Apenas um lote é solicitado por vez, com intervalo
+de cinco segundos; as consultas selecionadas pausam o início do próximo lote
+e não disputam sua trava. Sair da UF cancela a requisição de fundo. O frontend
+mantém páginas completas no cache, revalidando-as ao retornar após cinco minutos.
+
+O painel reutiliza a hierarquia sociopolítica: seleção mostra o valor principal,
+previsão e detalhes ficam recolhidos, e avisos/fontes só são consultados quando
+o usuário abre as opções ou habilita a camada. O índice de busca é antecipado
+após o mapa, com prioridade imediata ao receber foco. Os detalhes usam importação
+dinâmica para não ampliar o bundle inicial.
+
+Avisos oficiais continuam ingeridos pelo INMET em laço independente. As
+camadas de avisos e temperaturas não interceptam os eventos das divisas. Os
+jobs de estações INMET e CEMADEN permanecem como CLI legada, fora da atualização
+automática e do catálogo de fontes disponíveis, até terem leituras verificáveis.

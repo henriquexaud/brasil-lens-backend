@@ -22,21 +22,17 @@ from collections.abc import Awaitable, Callable
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.jobs import (
-    import_weather_cemaden,
-    import_weather_inmet_alerts,
-    import_weather_inmet_stations,
-)
+from app.jobs import import_weather_inmet_alerts
 
 logger = get_logger(__name__)
 
 # `main()` de cada job — a mesma função que `python -m app.jobs.x` chama via
 # `run_job`, só que aqui invocada direto (sem o wrapper que faz
 # `asyncio.run`/`SystemExit`/`dispose_engine`, que fecharia a engine da API).
+# Condições atuais vêm da Open-Meteo sob demanda e com cache.
+# Os jobs legados de estações continuam disponíveis pela CLI.
 _JOBS: tuple[tuple[str, Callable[[], Awaitable[int]]], ...] = (
-    ("inmet_stations", import_weather_inmet_stations.main),
     ("inmet_alerts", import_weather_inmet_alerts.main),
-    ("cemaden_rain_gauges", import_weather_cemaden.main),
 )
 
 _tasks: list[asyncio.Task[None]] = []

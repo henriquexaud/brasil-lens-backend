@@ -29,35 +29,10 @@ from app.schemas.weather import (
     WeatherStationProperties,
 )
 
-# Nome do job ↔ rótulo exibido ↔ cadência esperada ↔ chave de `details` que
-# prova produção real. Os nomes de job precisam bater com `JOB_NAME` em cada
-# `app/jobs/import_weather_*.py` — são o mesmo valor por coincidência de
-# responsabilidade (um job por fonte), não por acoplamento: este módulo nunca
-# importa os jobs (evitaria puxar providers/HTTP para o caminho de leitura).
-#
-# A quarta posição existe por um motivo concreto, não hipotético: rodando
-# `import_weather_inmet_stations` contra a fonte real, o job termina com
-# `status=succeeded` (a metade de metadado das estações funciona) mesmo
-# quando a leitura por estação não devolve nenhuma observação — ver
-# `app/providers/inmet/stations.py` sobre o HTTP 204 confirmado em todas as
-# janelas testadas. Sem checar `details["observations"] > 0`,
-# `GET /weather/sources` diria "ok" para uma fonte que não está, de fato,
-# entregando temperatura/umidade/pressão nenhuma. Para alertas, `None` é
-# correto: zero avisos ativos é um estado real e são bons, não uma falha.
+# Apenas avisos oficiais são ingeridos automaticamente. Condições e previsão
+# são consultadas em services/weather_forecast.py, com cache independente.
 _SOURCE_DEFINITIONS: tuple[tuple[str, str, str, str | None], ...] = (
-    (
-        "import_weather_inmet_stations",
-        "inmet_stations",
-        "INMET — Estações Meteorológicas Automáticas",
-        "observations",
-    ),
     ("import_weather_inmet_alerts", "inmet_alerts", "INMET — Avisos Meteorológicos", None),
-    (
-        "import_weather_cemaden",
-        "cemaden_rain_gauges",
-        "CEMADEN — Pluviômetros Automáticos",
-        None,
-    ),
 )
 
 # Uma fonte sem execução bem-sucedida há mais que isto (múltiplo da cadência

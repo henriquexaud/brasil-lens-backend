@@ -14,21 +14,15 @@ cada um alimenta.
 from __future__ import annotations
 
 from app.models import DataContext
-from app.providers import cemaden, ibge, inmet
+from app.providers import ibge, inmet, open_meteo
 from app.providers.descriptor import ProviderDescriptor
 
-# Um provider por linha. `biodiversity` ainda não tem nenhum: o contexto já
-# existe (ver app/models/context.py) e já aparece em `/contexts` com zero
-# providers — pronto para receber o primeiro, sem migration nem mudança de
-# contrato. `climate_environmental` ganhou o seu primeiro em PROVIDER_CLIMATE,
-# e agora também INMET (estações + avisos) e CEMADEN (pluviômetros — ver
-# app/providers/cemaden/rain_gauges.py sobre o endpoint ainda não confirmado).
+# Fontes efetivamente disponíveis para os contextos públicos.
 PROVIDERS: tuple[ProviderDescriptor, ...] = (
     ibge.PROVIDER,
     ibge.PROVIDER_CLIMATE,
-    inmet.PROVIDER_STATIONS,
+    open_meteo.PROVIDER,
     inmet.PROVIDER_ALERTS,
-    cemaden.PROVIDER_RAIN_GAUGES,
 )
 
 

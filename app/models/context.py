@@ -31,7 +31,7 @@ class DataContext(str, enum.Enum):
 # backend, não um dado ingerido.
 DATA_CONTEXT_INFO: dict[DataContext, tuple[str, str]] = {
     DataContext.SOCIOPOLITICAL: (
-        "Sociopolítico",
+        "Socioeconômico",
         "População, demografia, eleições, economia, setores econômicos e "
         "outros indicadores territoriais.",
     ),

@@ -10,10 +10,10 @@ recorte territorial nem classe de quantil — ver `docs/ARCHITECTURE.md`
 from __future__ import annotations
 
 import enum
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import Field, FiniteFloat
 
 from app.schemas.common import ApiDecimal, CamelModel
 
@@ -92,3 +92,38 @@ class WeatherSourceStatus(CamelModel):
 
 class WeatherSourcesResponse(CamelModel):
     sources: list[WeatherSourceStatus]
+
+
+class WeatherForecastDay(CamelModel):
+    date: date
+    weather_code: int | None
+    temperature_min_c: FiniteFloat | None
+    temperature_max_c: FiniteFloat | None
+    precipitation_probability_pct: FiniteFloat | None
+
+
+class WeatherCity(CamelModel):
+    id: str
+    name: str
+    state_abbreviation: str
+    latitude: float
+    longitude: float
+    timezone: str
+    observed_at: datetime
+    temperature_c: FiniteFloat
+    apparent_temperature_c: FiniteFloat | None
+    humidity_pct: FiniteFloat | None
+    wind_speed_kmh: FiniteFloat | None
+    precipitation_mm: FiniteFloat | None
+    precipitation_interval_minutes: int
+    weather_code: int | None
+    forecast: list[WeatherForecastDay]
+
+
+class WeatherCurrentResponse(CamelModel):
+    source: str = "Open-Meteo"
+    source_url: str = "https://open-meteo.com/"
+    fetched_at: datetime
+    status: WeatherSourceStatusValue = WeatherSourceStatusValue.OK
+    cities: list[WeatherCity]
+    next_offset: int | None = None

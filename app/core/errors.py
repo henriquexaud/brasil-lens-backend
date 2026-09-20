@@ -73,7 +73,7 @@ class InvalidParameterError(DomainError):
 class ProviderError(DomainError):
     """Falha ao consultar ou interpretar uma fonte externa.
 
-    Só ocorre durante a ingestão: nenhuma requisição de usuário toca fonte externa.
+    Usado na ingestão e nas consultas de clima sob demanda.
     """
 
     status_code = 502

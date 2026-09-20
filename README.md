@@ -776,3 +776,40 @@ As visualizações salvas são **globais**, não por usuário: sem autenticaçã
 escopo, um `owner_id` seria um campo sem dono de verdade. O dia em que houver
 login, a coluna entra por migration e o serviço filtra por ela — o modelo não
 precisa mudar de forma.
+
+### Clima atual e previsão
+
+`GET /api/v1/weather/current` consulta as 27 capitais na
+[Open-Meteo](https://open-meteo.com/en/docs), sem chave. O parâmetro opcional
+`?territory=3509502` consulta um município pelo código IBGE; para UFs, como
+`?territory=35`, retorna a capital como referência, nunca uma média estadual.
+A consulta municipal usa um ponto interno da geometria IBGE no PostGIS.
+
+`forecast=false` solicita apenas condições atuais; o padrão `true` mantém
+a previsão de três dias para clientes existentes. O frontend usa a consulta
+completa somente quando a seção de previsão é expandida.
+
+`GET /api/v1/weather/municipalities?parent=35&offset=0&limit=40` retorna as
+condições atuais dos municípios da UF em ordem de código IBGE. `nextOffset`
+indica o próximo lote, ou `null` ao terminar. O limite máximo é 40; a consulta
+usa uma chamada com múltiplas coordenadas e aquece o cache de cada município.
+
+Retorna temperatura, sensação térmica, umidade, vento em km/h, precipitação
+com duração explícita do intervalo e previsão diária de três dias. São
+estimativas de modelos, não medições de estações. Os instantes são UTC e as
+datas da previsão respeitam o fuso do local.
+
+O cache dura dez minutos e tem limite de 128 entradas por processo. Falhas
+preservam o último resultado por no máximo duas horas de idade, marcado
+`stale`, com os horários originais; sem dado utilizável a API responde 502.
+Novas tentativas após falhas têm intervalo mínimo de um minuto por local.
+Condições atuais e previsões têm chaves independentes. A deduplicação ocorre
+por chave, de modo que uma consulta selecionada não espera o lote de fundo.
+
+Os avisos oficiais continuam em `/weather/alerts`, atualizados pelo scheduler
+do INMET. As importações legadas de estações e CEMADEN não rodam no scheduler,
+pois não estavam produzindo leituras utilizáveis. `/weather/stations` continua
+compatível com dados previamente ingeridos. `/weather/sources` informa o
+estado da ingestão de avisos; `/weather/current` inclui sua própria fonte,
+status e horário de consulta. A API gratuita da Open-Meteo se destina a uso
+não comercial; consulte os termos do provedor para publicação comercial.

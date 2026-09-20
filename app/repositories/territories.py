@@ -6,13 +6,14 @@ não há dado, como classificar) mora aqui — isso é responsabilidade do servi
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from app.models import Territory, TerritoryLevel
+from app.models import GeometryLOD, Territory, TerritoryGeometry, TerritoryLevel
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +90,18 @@ async def get_by_code(session: AsyncSession, ibge_code: str) -> TerritoryRow | N
     stmt = _select_with_relations().where(Territory.ibge_code == ibge_code)
     record = (await session.execute(stmt)).first()
     return _to_row(record) if record is not None else None
+
+
+async def get_weather_point(session: AsyncSession, ibge_code: str) -> tuple[float, float] | None:
+    """Ponto interno da malha municipal: evita consultar no mar ou fora do território."""
+    point = func.ST_PointOnSurface(TerritoryGeometry.geom)
+    stmt = (
+        select(func.ST_Y(point), func.ST_X(point))
+        .join(Territory, Territory.id == TerritoryGeometry.territory_id)
+        .where(Territory.ibge_code == ibge_code, TerritoryGeometry.lod == GeometryLOD.OVERVIEW)
+    )
+    row = (await session.execute(stmt)).first()
+    return (float(row[0]), float(row[1])) if row else None
 
 
 async def get_id_by_code(session: AsyncSession, ibge_code: str) -> int | None:
@@ -172,3 +185,109 @@ async def children_summary(
     if total == 0:
         return 0, None
     return total, TerritoryLevel(record.child_level)
+
+
+_DISPERSED_POINTS_CACHE: dict[str, list[tuple[str, str, float, float]]] = {}
+
+
+def _farthest_point_sampling(
+    points: list[tuple[str, str, float, float]],
+    start_idx: int = 0,
+) -> list[tuple[str, str, float, float]]:
+    n = len(points)
+    if n <= 1:
+        return points
+
+    start_idx = max(0, min(start_idx, n - 1))
+    lats = [p[2] for p in points]
+    lons = [p[3] for p in points]
+
+    mid_lat = sum(lats) / n
+    cos_lat = math.cos(math.radians(mid_lat))
+    adj_lons = [lon * cos_lat for lon in lons]
+
+    visited = [False] * n
+    visited[start_idx] = True
+    selected = [start_idx]
+
+    start_lat = lats[start_idx]
+    start_lon = adj_lons[start_idx]
+
+    min_dists = [
+        (lats[i] - start_lat) ** 2 + (adj_lons[i] - start_lon) ** 2
+        for i in range(n)
+    ]
+
+    for _ in range(1, n):
+        best_idx = -1
+        best_dist = -1.0
+        for i in range(n):
+            if not visited[i] and min_dists[i] > best_dist:
+                best_dist = min_dists[i]
+                best_idx = i
+        if best_idx == -1:
+            break
+        visited[best_idx] = True
+        selected.append(best_idx)
+        new_lat = lats[best_idx]
+        new_lon = adj_lons[best_idx]
+        for i in range(n):
+            if not visited[i]:
+                d = (lats[i] - new_lat) ** 2 + (adj_lons[i] - new_lon) ** 2
+                if d < min_dists[i]:
+                    min_dists[i] = d
+
+    for i in range(n):
+        if not visited[i]:
+            selected.append(i)
+
+    return [points[i] for i in selected]
+
+
+async def list_weather_points(
+    session: AsyncSession,
+    parent_code: str,
+    offset: int,
+    limit: int,
+) -> list[tuple[str, str, float, float]]:
+    if parent_code in _DISPERSED_POINTS_CACHE:
+        all_points = _DISPERSED_POINTS_CACHE[parent_code]
+        return all_points[offset : offset + limit]
+
+    parent = aliased(Territory)
+    point = func.ST_PointOnSurface(TerritoryGeometry.geom)
+    stmt = (
+        select(
+            Territory.ibge_code,
+            Territory.name,
+            func.ST_Y(point),
+            func.ST_X(point),
+            parent.capital_territory_id,
+            Territory.id,
+        )
+        .join(TerritoryGeometry, TerritoryGeometry.territory_id == Territory.id)
+        .join(parent, Territory.parent_id == parent.id)
+        .where(
+            parent.ibge_code == parent_code,
+            Territory.level == TerritoryLevel.MUNICIPALITY,
+            TerritoryGeometry.lod == GeometryLOD.OVERVIEW,
+        )
+        .order_by(Territory.ibge_code)
+    )
+    rows = (await session.execute(stmt)).all()
+    if not rows:
+        return []
+
+    points = [(row[0], row[1], float(row[2]), float(row[3])) for row in rows]
+    capital_id = rows[0][4]
+    start_idx = 0
+    if capital_id is not None:
+        for idx, row in enumerate(rows):
+            if row[5] == capital_id:
+                start_idx = idx
+                break
+
+    ordered_points = _farthest_point_sampling(points, start_idx)
+    _DISPERSED_POINTS_CACHE[parent_code] = ordered_points
+    return ordered_points[offset : offset + limit]
+
