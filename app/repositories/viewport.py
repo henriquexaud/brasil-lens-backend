@@ -25,11 +25,22 @@ async def locate(session: AsyncSession, latitude: float, longitude: float) -> st
 
 
 async def weather_points(
-    session: AsyncSession, bbox: tuple[float, float, float, float], offset: int, limit: int
+    session: AsyncSession,
+    bbox: tuple[float, float, float, float],
+    offset: int,
+    limit: int,
+    parent: str | None = None,
 ) -> list[tuple[str, str, str, float, float]]:
     state = aliased(Territory)
     point = func.ST_PointOnSurface(TerritoryGeometry.geom)
     center = func.ST_SetSRID(func.ST_Point((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2), 4326)
+    conditions = [
+        Territory.level == TerritoryLevel.MUNICIPALITY,
+        TerritoryGeometry.lod == GeometryLOD.CANONICAL,
+        func.ST_Intersects(TerritoryGeometry.geom, func.ST_MakeEnvelope(*bbox, 4326)),
+    ]
+    if parent:
+        conditions.append(Territory.ibge_code.startswith(parent))
     stmt = (
         select(
             Territory.ibge_code,
@@ -40,11 +51,7 @@ async def weather_points(
         )
         .join(state, Territory.parent_id == state.id)
         .join(TerritoryGeometry, TerritoryGeometry.territory_id == Territory.id)
-        .where(
-            Territory.level == TerritoryLevel.MUNICIPALITY,
-            TerritoryGeometry.lod == GeometryLOD.CANONICAL,
-            func.ST_Intersects(TerritoryGeometry.geom, func.ST_MakeEnvelope(*bbox, 4326)),
-        )
+        .where(*conditions)
         .order_by(func.ST_Distance(point, center), Territory.ibge_code)
         .offset(offset)
         .limit(limit)

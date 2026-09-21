@@ -72,7 +72,7 @@ async def fetch_locations(
                 **(
                     {
                         "daily": "weather_code,temperature_2m_max,temperature_2m_min,"
-                        "precipitation_probability_max"
+                        "precipitation_probability_max,precipitation_sum"
                     }
                     if include_forecast
                     else {}
@@ -103,6 +103,8 @@ def _parse_city(raw: dict[str, Any], capital: tuple[str, str, float, float]) -> 
     current, daily = raw["current"], raw.get("daily", {})
     # UNIX mantém o instante em UTC; a data diária precisa do fuso da cidade.
     timezone = ZoneInfo(raw["timezone"])
+    precip_sums = daily.get("precipitation_sum") or []
+    precip_probs = daily.get("precipitation_probability_max") or []
     return WeatherCity(
         id=state,
         name=name,
@@ -116,6 +118,8 @@ def _parse_city(raw: dict[str, Any], capital: tuple[str, str, float, float]) -> 
         humidity_pct=current.get("relative_humidity_2m"),
         wind_speed_kmh=current.get("wind_speed_10m"),
         precipitation_mm=current.get("precipitation"),
+        precipitation_sum_mm=precip_sums[0] if precip_sums else current.get("precipitation"),
+        precipitation_probability_pct=precip_probs[0] if precip_probs else None,
         precipitation_interval_minutes=current["interval"] // 60,
         weather_code=current.get("weather_code"),
         forecast=[
@@ -125,7 +129,9 @@ def _parse_city(raw: dict[str, Any], capital: tuple[str, str, float, float]) -> 
                 temperature_min_c=daily["temperature_2m_min"][i],
                 temperature_max_c=daily["temperature_2m_max"][i],
                 precipitation_probability_pct=daily["precipitation_probability_max"][i],
+                precipitation_sum_mm=precip_sums[i] if i < len(precip_sums) else None,
             )
             for i, timestamp in enumerate(daily.get("time", []))
+            if "weather_code" in daily
         ],
     )

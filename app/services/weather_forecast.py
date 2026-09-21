@@ -174,10 +174,11 @@ async def get_viewport_current(
     bbox: tuple[float, float, float, float],
     offset: int,
     limit: int,
+    parent: str | None = None,
 ) -> WeatherCurrentResponse:
     from app.repositories.viewport import weather_points
 
-    points = await weather_points(session, bbox, offset, limit + 1)
+    points = await weather_points(session, bbox, offset, limit + 1, parent=parent)
     more = len(points) > limit
     points = points[:limit]
     if not points:

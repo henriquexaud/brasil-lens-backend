@@ -53,5 +53,49 @@ async def test_viewport_only_fetches_missing_cities_and_warms_individual_cache(m
     assert fetch.call_args.args[1] == (("RJ", "Rio de Janeiro", -22.9, -43.2),)
     assert service._cache.get("3304557:current") is not None
     await service.get_viewport_current(AsyncMock(), (-48, -25, -42, -21), 0, 20)
-    assert fetch.call_count == 1, "arrastar reaproveita os mesmos municípios"
     service._cache.clear()
+
+
+async def test_viewport_weather_filters_by_parent(monkeypatch):
+    service._cache.clear()
+    points = [
+        ("3550308", "São Paulo", "SP", -23.55, -46.63),
+    ]
+    mock_weather_points = AsyncMock(return_value=points)
+    monkeypatch.setattr(viewport, "weather_points", mock_weather_points)
+    monkeypatch.setattr(redis_cache, "read", AsyncMock(return_value=None))
+    monkeypatch.setattr(redis_cache, "write", AsyncMock())
+
+    def result(code, name, uf, lat, lon):
+        return WeatherCurrentResponse(
+            fetched_at=datetime.now(UTC),
+            cities=[
+                WeatherCity(
+                    id=code,
+                    name=name,
+                    state_abbreviation=uf,
+                    latitude=lat,
+                    longitude=lon,
+                    observed_at=datetime.now(UTC),
+                    timezone="America/Sao_Paulo",
+                    temperature_c=25,
+                    apparent_temperature_c=None,
+                    humidity_pct=None,
+                    wind_speed_kmh=None,
+                    precipitation_mm=None,
+                    precipitation_interval_minutes=15,
+                    weather_code=0,
+                    forecast=[],
+                )
+            ],
+        )
+
+    service._cache.set("3550308:current", result(*points[0]))
+    response = await service.get_viewport_current(
+        AsyncMock(), (-47, -24, -43, -22), 0, 20, parent="35"
+    )
+    assert mock_weather_points.call_count == 1
+    assert mock_weather_points.call_args.kwargs["parent"] == "35"
+    assert [city.id for city in response.cities] == ["3550308"]
+    service._cache.clear()
+

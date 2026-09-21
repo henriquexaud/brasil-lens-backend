@@ -100,6 +100,7 @@ class WeatherForecastDay(CamelModel):
     temperature_min_c: FiniteFloat | None
     temperature_max_c: FiniteFloat | None
     precipitation_probability_pct: FiniteFloat | None
+    precipitation_sum_mm: FiniteFloat | None = None
 
 
 class WeatherCity(CamelModel):
@@ -115,6 +116,8 @@ class WeatherCity(CamelModel):
     humidity_pct: FiniteFloat | None
     wind_speed_kmh: FiniteFloat | None
     precipitation_mm: FiniteFloat | None
+    precipitation_sum_mm: FiniteFloat | None = None
+    precipitation_probability_pct: FiniteFloat | None = None
     precipitation_interval_minutes: int
     weather_code: int | None
     forecast: list[WeatherForecastDay]
