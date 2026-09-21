@@ -68,7 +68,7 @@ async def get_map(
     classes: Annotated[int, Query(ge=2, le=9, description="Número de classes.")] = (
         DEFAULT_CLASS_COUNT
     ),
-) -> MapFeatureCollection:
+) -> MapFeatureCollection | Response:
     collection = await map_service.get_map(
         session,
         level=level,
@@ -85,16 +85,9 @@ async def get_map(
         f'{collection.indicator.year if collection.indicator else "none"}-'
         f'{collection.scope.lod.value}-{collection.scope.count}"'
     )
-    if_none_match = request.headers.get("if-none-match")
-    if if_none_match and if_none_match.strip() == etag:
-        return Response(
-            status_code=304,
-            headers={
-                "ETag": etag,
-                "Cache-Control": f"public, max-age={settings.http_cache_max_age}",
-            },
-        )
+    headers = {"ETag": etag, "Cache-Control": f"public, max-age={settings.http_cache_max_age}"}
+    if request.headers.get("if-none-match", "").strip() == etag:
+        return Response(status_code=304, headers=headers)
 
-    response.headers["ETag"] = etag
-    response.headers["Cache-Control"] = f"public, max-age={settings.http_cache_max_age}"
+    response.headers.update(headers)
     return collection

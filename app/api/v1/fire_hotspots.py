@@ -7,7 +7,6 @@ from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_session
-from app.api.deps import get_session
 from app.schemas.fire_hotspots import (
     FireHotspotCollection,
     FireHotspotDetails,

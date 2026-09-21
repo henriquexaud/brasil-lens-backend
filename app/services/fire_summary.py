@@ -20,7 +20,7 @@ from app.core import redis_cache
 from app.core.cache import TTLCache
 from app.core.config import settings
 from app.core.errors import InvalidParameterError, ProviderError
-from app.repositories.fire import municipality_areas, state_areas
+from app.repositories.boundaries import municipality_areas, state_areas
 from app.schemas.fire_hotspots import FireMunicipality, FireScope, FireSummary
 from app.services.fire_hotspots import _fetch_wfs, _scope_filter, _time_filter
 
@@ -113,8 +113,7 @@ def aggregate(
         municipalities=muni_list,
         states=[item for item in municipalities if len(item.ibge_code) == 2],
         ranked_municipalities=ranked,
-        unassigned_count=len(rows)
-        - sum(item.count for item in muni_list),
+        unassigned_count=len(rows) - sum(item.count for item in muni_list),
     )
 
 

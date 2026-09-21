@@ -35,7 +35,9 @@ _TRANSIENT_STATUS = frozenset({429, 500, 502, 503, 504})
 async def http_client(
     base_url: str | None = None,
     *,
-    timeout: float | None = None,
+    # É o timeout de cada requisição do cliente httpx, não um prazo para esta
+    # função — o ASYNC109 não se aplica.
+    timeout: float | None = None,  # noqa: ASYNC109
 ) -> AsyncIterator[httpx.AsyncClient]:
     """Cliente HTTP com defaults do IBGE, sobrepostos por qualquer provider.
 

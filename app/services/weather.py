@@ -147,7 +147,6 @@ def _status_for(
     rótulo: das três perspectivas do frontend, não há dado confiável para
     mostrar. `stale` existe separado de `unavailable` porque uma fonte que só
     está atrasada (ciclo perdido) é uma situação diferente de uma fonte sem
-    contrato nenhum (ver `app/providers/cemaden/rain_gauges.py`) ou sem
     produção real (ver `app/providers/inmet/stations.py` e o comentário em
     `_SOURCE_DEFINITIONS`).
     """

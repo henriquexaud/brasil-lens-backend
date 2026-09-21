@@ -98,4 +98,3 @@ async def test_viewport_weather_filters_by_parent(monkeypatch):
     assert mock_weather_points.call_args.kwargs["parent"] == "35"
     assert [city.id for city in response.cities] == ["3550308"]
     service._cache.clear()
-

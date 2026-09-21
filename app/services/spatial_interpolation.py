@@ -8,14 +8,11 @@ processamento no cliente.
 from __future__ import annotations
 
 import math
-from datetime import UTC, datetime
 
 from app.schemas.weather import WeatherCity
 
 
-def _geo_dist_sq(
-    lat1: float, lon1: float, lat2: float, lon2: float, cos_lat: float
-) -> float:
+def _geo_dist_sq(lat1: float, lon1: float, lat2: float, lon2: float, cos_lat: float) -> float:
     """Distância ao quadrado considerando curvatura da Terra aproximada local."""
     d_lat = lat1 - lat2
     d_lon = (lon1 - lon2) * cos_lat
@@ -91,18 +88,14 @@ def interpolate_municipal_weather(
             weighted_precip_prob += city.precipitation_probability_pct * weight
             has_precip_prob = True
 
-    est_temp = (
-        weighted_temp / total_weight if total_weight > 0 else closest_city.temperature_c
-    )
+    est_temp = weighted_temp / total_weight if total_weight > 0 else closest_city.temperature_c
     est_apparent = (
         weighted_apparent / total_weight
         if total_weight > 0
         else closest_city.apparent_temperature_c
     )
     est_humidity = (
-        round(weighted_humidity / total_weight)
-        if (has_humidity and total_weight > 0)
-        else None
+        round(weighted_humidity / total_weight) if (has_humidity and total_weight > 0) else None
     )
     est_precip_sum = (
         round((weighted_precip_sum / total_weight), 1)
@@ -121,8 +114,10 @@ def interpolate_municipal_weather(
         state_abbreviation=state_abbr or closest_city.state_abbreviation,
         latitude=target_lat,
         longitude=target_lon,
-        timezone="America/Sao_Paulo",
-        observed_at=datetime.now(UTC),
+        # Fuso e horário vêm da medição mais próxima: a estimativa não é mais
+        # recente que ela, e vários estados não estão no fuso de Brasília.
+        timezone=closest_city.timezone,
+        observed_at=closest_city.observed_at,
         temperature_c=round(est_temp, 1),
         apparent_temperature_c=round(est_apparent, 1) if est_apparent is not None else None,
         humidity_pct=est_humidity,
@@ -130,9 +125,8 @@ def interpolate_municipal_weather(
         precipitation_mm=closest_city.precipitation_mm or 0.0,
         precipitation_sum_mm=est_precip_sum,
         precipitation_probability_pct=est_precip_prob,
-        precipitation_interval_minutes=15,
+        precipitation_interval_minutes=closest_city.precipitation_interval_minutes,
         weather_code=closest_city.weather_code or 0,
         forecast=[],
         is_inferred=True,
     )
-

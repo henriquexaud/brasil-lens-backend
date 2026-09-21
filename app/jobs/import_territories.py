@@ -15,27 +15,21 @@ FK real: o pai precisa existir antes do filho.
 
 from __future__ import annotations
 
-import unicodedata
 from datetime import UTC, datetime
 
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-
-def normalize_text(text: str) -> str:
-    return "".join(
-        c for c in unicodedata.normalize("NFD", text) if unicodedata.category(c) != "Mn"
-    ).lower().strip()
-
 from app.core.logging import get_logger
+from app.core.text import normalize_text
 from app.db.results import affected_rows
 from app.jobs._runner import RunReport, job_session, run_job, upsert_dataset
 from app.models import Territory, TerritoryLevel
 from app.providers.base import http_client
 from app.providers.ibge import localidades
-from app.providers.records import TerritoryRecord
 from app.providers.ibge.reference import COUNTRY_CAPITAL, STATE_CAPITALS
+from app.providers.records import TerritoryRecord
 
 logger = get_logger(__name__)
 

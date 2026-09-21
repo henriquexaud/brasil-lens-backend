@@ -89,3 +89,25 @@ def test_interpolate_without_cities_raises():
             state_abbr="SP",
         )
 
+
+def test_interpolated_city_keeps_timezone_and_time_of_closest_measurement():
+    """A estimativa não pode parecer mais recente que a medição de origem, nem
+    mudar o fuso: o painel exibe o horário da leitura no fuso da cidade."""
+    observed = datetime(2026, 9, 21, 15, 0, tzinfo=UTC)
+    manaus = make_city("AM", "Manaus", -3.1, -60.0, 31.0).model_copy(
+        update={"timezone": "America/Manaus", "observed_at": observed}
+    )
+    far = make_city("FAR", "Distante", -9.0, -70.0, 25.0)
+
+    result = interpolate_municipal_weather(
+        target_code="1300000",
+        target_name="Vizinho de Manaus",
+        target_lat=-3.3,
+        target_lon=-60.2,
+        measured_cities=[manaus, far],
+        state_abbr="AM",
+    )
+
+    assert result.is_inferred is True
+    assert result.timezone == "America/Manaus"
+    assert result.observed_at == observed

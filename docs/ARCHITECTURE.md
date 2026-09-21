@@ -949,14 +949,15 @@ mantém páginas completas no cache, revalidando-as ao retornar após cinco minu
 
 O painel reutiliza a hierarquia sociopolítica: seleção mostra o valor principal,
 previsão e detalhes ficam recolhidos, e avisos/fontes só são consultados quando
-o usuário abre as opções ou habilita a camada. O índice de busca é antecipado
-após o mapa, com prioridade imediata ao receber foco. Os detalhes usam importação
-dinâmica para não ampliar o bundle inicial.
+o usuário abre as opções ou habilita a camada. A busca de territórios é feita no
+backend, sobre nomes normalizados na ingestão, e só consulta a partir de duas
+letras. Os detalhes usam importação dinâmica para não ampliar o bundle inicial.
 
 Avisos oficiais continuam ingeridos pelo INMET em laço independente. As
 camadas de avisos e temperaturas não interceptam os eventos das divisas. Os
-jobs de estações INMET e CEMADEN permanecem como CLI legada, fora da atualização
-automática e do catálogo de fontes disponíveis, até terem leituras verificáveis.
+job de estações INMET permanece como CLI legada, fora da atualização automática
+e do catálogo de fontes disponíveis, até ter leituras verificáveis. O provider
+CEMADEN, sem endpoint público confirmado, foi removido.
 
 ### Focos INPE: cobertura completa e detalhe sob demanda
 

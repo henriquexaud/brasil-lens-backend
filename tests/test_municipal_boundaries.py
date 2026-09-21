@@ -8,7 +8,7 @@ from sqlalchemy import text
 
 from app.core import redis_cache
 from app.models import GeometryLOD
-from app.repositories.fire import municipality_map
+from app.repositories.boundaries import municipality_map
 
 
 @pytest.mark.db

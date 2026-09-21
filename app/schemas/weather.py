@@ -136,8 +136,7 @@ class WeatherSummary(CamelModel):
 
 def build_weather_summary(cities: list[WeatherCity]) -> WeatherSummary:
     valid_temps = [
-        c for c in cities
-        if c.temperature_c is not None and math.isfinite(c.temperature_c)
+        c for c in cities if c.temperature_c is not None and math.isfinite(c.temperature_c)
     ]
     if not valid_temps:
         hottest: list[WeatherCity] = []

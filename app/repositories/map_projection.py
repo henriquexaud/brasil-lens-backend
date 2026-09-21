@@ -205,4 +205,3 @@ async def fetch_single_feature(
         geometry_json=result.geometry_json,
         bbox=(result.bbox_west, result.bbox_south, result.bbox_east, result.bbox_north),
     )
-

@@ -807,8 +807,10 @@ Condições atuais e previsões têm chaves independentes. A deduplicação ocor
 por chave, de modo que uma consulta selecionada não espera o lote de fundo.
 
 Os avisos oficiais continuam em `/weather/alerts`, atualizados pelo scheduler
-do INMET. As importações legadas de estações e CEMADEN não rodam no scheduler,
-pois não estavam produzindo leituras utilizáveis. `/weather/stations` continua
+do INMET. A importação legada de estações não roda no scheduler, pois não
+estava produzindo leituras utilizáveis; o provider CEMADEN, que nunca teve um
+endpoint público confirmado, foi removido (o valor `cemaden` do enum
+`weather_provider` permanece no schema). `/weather/stations` continua
 compatível com dados previamente ingeridos. `/weather/sources` informa o
 estado da ingestão de avisos; `/weather/current` inclui sua própria fonte,
 status e horário de consulta. A API gratuita da Open-Meteo se destina a uso

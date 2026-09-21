@@ -59,10 +59,6 @@ class Settings(BaseSettings):
     # retentativa (ver app/providers/inmet/stations.py) é o que faz o ciclo
     # completar sem depender de adivinhar o teto exato da fonte.
     inmet_max_concurrency: int = 2
-    # Ainda não confirmada (ver app/providers/cemaden/) — placeholder até a
-    # verificação de endpoint ser concluída durante a implementação.
-    cemaden_base_url: str = ""
-    cemaden_http_timeout: float = 30.0
 
     # Liga o laço asyncio de atualização periódica (app/jobs/weather_scheduler.py)
     # no lifespan da API. Desligado em teste/CI por padrão via .env, para não

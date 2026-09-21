@@ -54,8 +54,9 @@ async def test_visao_inicial_traz_as_27_ufs_em_geometria_otimizada(
 
     assert collection.type == "FeatureCollection"
     assert collection.scope.count == 27
-    # A visão do país inteiro nunca serve geometria canônica.
-    assert collection.scope.lod is GeometryLOD.OVERVIEW
+    # A visão do país inteiro nunca serve geometria canônica; as UFs usam a
+    # intermediária porque o mesmo contorno emoldura o estado aberto.
+    assert collection.scope.lod is GeometryLOD.DETAIL
     assert len(collection.features) == 27
     assert {feature.properties.abbreviation for feature in collection.features} >= {"SP", "DF"}
 
@@ -336,6 +337,7 @@ async def test_projecao_compartilhada_e_servida_do_cache(session: AsyncSession) 
 async def test_projecao_com_etag_e_304(session: AsyncSession) -> None:
     await _require_ingested_data(session)
     from httpx import ASGITransport, AsyncClient
+
     from app.main import app
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -348,4 +350,3 @@ async def test_projecao_com_etag_e_304(session: AsyncSession) -> None:
         res2 = await client.get("/api/v1/map?level=state", headers={"If-None-Match": etag})
         assert res2.status_code == 304
         assert res2.text == ""
-

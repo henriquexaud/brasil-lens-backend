@@ -37,9 +37,11 @@ from app.services.classification import DEFAULT_CLASS_COUNT, describe
 
 logger = get_logger(__name__)
 
-# Política de detalhe: níveis que aparecem no mapa do país inteiro usam a
-# geometria mais agressiva; municípios, vistos no zoom de um estado, usam a
-# intermediária. Ver docs/ARCHITECTURE.md §5.
+# Política de detalhe: país e regiões usam a geometria mais agressiva. UFs e
+# municípios usam a intermediária — as fronteiras estaduais são desenhadas
+# também como contorno do estado aberto, onde a simplificação de `overview`
+# ficava visível. A canônica nunca é servida por aqui (ver `MapLod`).
+# Ver docs/ARCHITECTURE.md §5.
 _DEFAULT_LOD: dict[TerritoryLevel, GeometryLOD] = {
     TerritoryLevel.COUNTRY: GeometryLOD.OVERVIEW,
     TerritoryLevel.REGION: GeometryLOD.OVERVIEW,
@@ -82,7 +84,16 @@ async def get_map(
     if cached is not None:
         return cached
 
-    redis_key = f"{level.value}:{parent_code or 'root'}:{indicator_key or 'none'}:{requested_year}:{effective_lod.value}:{classes}"
+    redis_key = ":".join(
+        (
+            level.value,
+            parent_code or "root",
+            indicator_key or "none",
+            requested_year,
+            effective_lod.value,
+            str(classes),
+        )
+    )
     cached_redis = await redis_cache.read("map-projection", redis_key, MapFeatureCollection)
     if cached_redis is not None:
         if len(cached_redis.features) <= settings.read_cache_max_features:
@@ -168,9 +179,7 @@ async def get_map(
 
     parent_feature: MapFeature | None = None
     if parent_code:
-        parent_row = await map_repo.fetch_single_feature(
-            session, parent_code, GeometryLOD.DETAIL
-        )
+        parent_row = await map_repo.fetch_single_feature(session, parent_code, GeometryLOD.DETAIL)
         if parent_row:
             parent_feature = MapFeature(
                 id=f"{parent_row.ibge_code}:detail",
@@ -200,9 +209,9 @@ async def get_map(
         },
     )
 
-    # Cacheia em memória local apenas projeções pequenas para não inflar o RSS do Python.
-    # No Redis comprimido (zlib), guardamos todas as projeções (incluindo estados com centenas de municípios),
-    # pois ocupam pouquíssimo espaço (~500 KB comprimido para MG) e eliminam o custo pesado do PostGIS.
+    # Em memória, só projeções pequenas: não inflam o RSS do processo. No Redis
+    # (comprimido com zlib) cabem todas — MG ocupa ~500 KB — e isso poupa o
+    # custo do PostGIS também para as projeções municipais.
     if len(features) <= settings.read_cache_max_features:
         _cache.set(cache_key, response)
     await redis_cache.write("map-projection", redis_key, response, 86400)

@@ -31,7 +31,6 @@ class MapLod(str, enum.Enum):
 
     OVERVIEW = "overview"
     DETAIL = "detail"
-    CANONICAL = "canonical"
 
     def to_geometry_lod(self) -> GeometryLOD:
         return GeometryLOD(self.value)

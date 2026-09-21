@@ -7,20 +7,15 @@ não há dado, como classificar) mora aqui — isso é responsabilidade do servi
 from __future__ import annotations
 
 import math
-import unicodedata
 from dataclasses import dataclass
+from typing import Any
 
-from sqlalchemy import Select, and_, case, func, or_, select
+from sqlalchemy import ColumnElement, Select, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.core.text import normalize_text
 from app.models import GeometryLOD, Territory, TerritoryGeometry, TerritoryLevel
-
-
-def _normalize_text(text: str) -> str:
-    return "".join(
-        c for c in unicodedata.normalize("NFD", text) if unicodedata.category(c) != "Mn"
-    ).lower().strip()
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +87,19 @@ def _to_row(record: object) -> TerritoryRow:
     )
 
 
+def _search_terms(search: str) -> tuple[str, ColumnElement[Any], ColumnElement[Any]]:
+    """Termo normalizado e as colunas comparáveis a ele (nome e sigla sem acento)."""
+    name_col = func.coalesce(Territory.normalized_name, func.lower(Territory.name))
+    abbr_col = func.coalesce(Territory.normalized_abbreviation, func.lower(Territory.abbreviation))
+    return normalize_text(search), name_col, abbr_col
+
+
+def _search_filter(search: str) -> ColumnElement[bool]:
+    """Casa o termo no nome, a sigla exata ou o início da sigla."""
+    clean, name_col, abbr_col = _search_terms(search)
+    return or_(name_col.contains(clean), abbr_col == clean, abbr_col.startswith(clean))
+
+
 async def get_by_code(session: AsyncSession, ibge_code: str) -> TerritoryRow | None:
     """Busca por código IBGE — o identificador canônico da API pública."""
     stmt = _select_with_relations().where(Territory.ibge_code == ibge_code)
@@ -141,18 +149,8 @@ async def list_territories(
             parent_filter.ibge_code == parent_ibge_code
         )
     if search:
-        clean = _normalize_text(search)
-        name_col = func.coalesce(Territory.normalized_name, func.lower(Territory.name))
-        abbr_col = func.coalesce(Territory.normalized_abbreviation, func.lower(Territory.abbreviation))
-
-        # Filtro: casa termo no nome, sigla exata ou início da sigla
-        stmt = stmt.where(
-            or_(
-                name_col.contains(clean),
-                abbr_col == clean,
-                abbr_col.startswith(clean),
-            )
-        )
+        clean, name_col, abbr_col = _search_terms(search)
+        stmt = stmt.where(_search_filter(search))
 
         # Pontuação de relevância (menor score = maior prioridade):
         # 0: Sigla exata ("SP")
@@ -198,16 +196,7 @@ async def count_territories(
             parent_filter.ibge_code == parent_ibge_code
         )
     if search:
-        clean = _normalize_text(search)
-        name_col = func.coalesce(Territory.normalized_name, func.lower(Territory.name))
-        abbr_col = func.coalesce(Territory.normalized_abbreviation, func.lower(Territory.abbreviation))
-        stmt = stmt.where(
-            or_(
-                name_col.contains(clean),
-                abbr_col == clean,
-                abbr_col.startswith(clean),
-            )
-        )
+        stmt = stmt.where(_search_filter(search))
     return (await session.execute(stmt)).scalar_one()
 
 
@@ -263,10 +252,7 @@ def _farthest_point_sampling(
     start_lat = lats[start_idx]
     start_lon = adj_lons[start_idx]
 
-    min_dists = [
-        (lats[i] - start_lat) ** 2 + (adj_lons[i] - start_lon) ** 2
-        for i in range(n)
-    ]
+    min_dists = [(lats[i] - start_lat) ** 2 + (adj_lons[i] - start_lon) ** 2 for i in range(n)]
 
     for _ in range(1, n):
         best_idx = -1
@@ -340,4 +326,3 @@ async def list_weather_points(
     ordered_points = _farthest_point_sampling(points, start_idx)
     _DISPERSED_POINTS_CACHE[parent_code] = ordered_points
     return ordered_points[offset : offset + limit]
-

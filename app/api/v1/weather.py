@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_session
 from app.core.errors import InvalidParameterError
-from app.repositories.fire import municipality_map
+from app.repositories.boundaries import municipality_map
 from app.schemas.map import MapFeatureCollection
 from app.schemas.weather import (
     WeatherAlertCollection,
