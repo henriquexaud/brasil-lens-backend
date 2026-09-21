@@ -15,6 +15,7 @@ from __future__ import annotations
 import orjson
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import redis_cache
 from app.core.cache import TTLCache
 from app.core.config import settings
 from app.core.errors import IndicatorNotFoundError, InvalidParameterError, TerritoryNotFoundError
@@ -80,6 +81,13 @@ async def get_map(
     cached = _cache.get(cache_key)
     if cached is not None:
         return cached
+
+    redis_key = f"{level.value}:{parent_code or 'root'}:{indicator_key or 'none'}:{requested_year}:{effective_lod.value}:{classes}"
+    cached_redis = await redis_cache.read("map-projection", redis_key, MapFeatureCollection)
+    if cached_redis is not None:
+        if len(cached_redis.features) <= settings.read_cache_max_features:
+            _cache.set(cache_key, cached_redis)
+        return cached_redis
 
     parent_id = await _resolve_parent(session, level, parent_code)
 
@@ -172,12 +180,12 @@ async def get_map(
         },
     )
 
-    # Cacheia apenas projeções pequenas. Uma coleção municipal desserializada
-    # ocupa ~7 MB, e o acerto é baixo (cada usuário abre um estado diferente):
-    # guardá-las trocaria centenas de MB de RSS por quase nenhum ganho. As
-    # projeções compartilhadas por todos — a visão inicial do país — cabem.
+    # Cacheia em memória local apenas projeções pequenas para não inflar o RSS do Python.
+    # No Redis comprimido (zlib), guardamos todas as projeções (incluindo estados com centenas de municípios),
+    # pois ocupam pouquíssimo espaço (~500 KB comprimido para MG) e eliminam o custo pesado do PostGIS.
     if len(features) <= settings.read_cache_max_features:
         _cache.set(cache_key, response)
+    await redis_cache.write("map-projection", redis_key, response, 86400)
     return response
 
 

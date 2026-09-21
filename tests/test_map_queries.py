@@ -331,3 +331,21 @@ async def test_projecao_compartilhada_e_servida_do_cache(session: AsyncSession) 
     # Mesmo objeto: a segunda chamada não tocou o banco.
     assert first is second
     assert map_service.cache_stats()["hits"] >= 1
+
+
+async def test_projecao_com_etag_e_304(session: AsyncSession) -> None:
+    await _require_ingested_data(session)
+    from httpx import ASGITransport, AsyncClient
+    from app.main import app
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res1 = await client.get("/api/v1/map?level=state")
+        assert res1.status_code == 200
+        etag = res1.headers.get("etag")
+        assert etag is not None
+        assert etag.startswith('W/"')
+
+        res2 = await client.get("/api/v1/map?level=state", headers={"If-None-Match": etag})
+        assert res2.status_code == 304
+        assert res2.text == ""
+

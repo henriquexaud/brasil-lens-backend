@@ -12,7 +12,7 @@ um contrato — em vez de dois caminhos que precisam ser mantidos em sincronia.
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_session
@@ -32,6 +32,7 @@ router = APIRouter(prefix="/map", tags=["map"])
     response_model_exclude_none=False,
 )
 async def get_map(
+    request: Request,
     response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
     level: Annotated[
@@ -77,7 +78,23 @@ async def get_map(
         lod=lod.to_geometry_lod() if lod else None,
         classes=classes,
     )
-    # Os dados só mudam durante a ingestão, então cache de cliente é seguro e é
-    # o que elimina o custo de rede nas visitas seguintes.
+    # ETag condicional: evita retransmitir megabytes de GeoJSON se o navegador já possui a malha
+    etag = (
+        f'W/"{collection.scope.level.value}-{collection.scope.parent or "all"}-'
+        f'{collection.indicator.key if collection.indicator else "none"}-'
+        f'{collection.indicator.year if collection.indicator else "none"}-'
+        f'{collection.scope.lod.value}-{collection.scope.count}"'
+    )
+    if_none_match = request.headers.get("if-none-match")
+    if if_none_match and if_none_match.strip() == etag:
+        return Response(
+            status_code=304,
+            headers={
+                "ETag": etag,
+                "Cache-Control": f"public, max-age={settings.http_cache_max_age}",
+            },
+        )
+
+    response.headers["ETag"] = etag
     response.headers["Cache-Control"] = f"public, max-age={settings.http_cache_max_age}"
     return collection

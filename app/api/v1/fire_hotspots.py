@@ -7,17 +7,15 @@ from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_session
-from app.repositories.fire import municipality_map
+from app.api.deps import get_session
 from app.schemas.fire_hotspots import (
     FireHotspotCollection,
     FireHotspotDetails,
     FireScope,
     FireSummary,
 )
-from app.schemas.map import MapFeatureCollection
 from app.services import fire_hotspots as service
 from app.services import fire_summary
-from app.services.viewport import parse_bbox
 
 router = APIRouter(prefix="/fire-hotspots", tags=["fire-hotspots"])
 Parent = Annotated[str | None, Query(pattern=r"^(?:\d{2}|\d{7})$")]
@@ -33,19 +31,6 @@ async def summary(
     hours: Hours = service.DEFAULT_FIRE_HOURS,
 ) -> FireSummary:
     return await fire_summary.get_summary(session, level=level, parent=parent, hours=hours, at=at)
-
-
-@router.get("/municipalities", response_model=MapFeatureCollection)
-async def municipalities(
-    response: Response,
-    session: Annotated[AsyncSession, Depends(get_session)],
-    bbox: str,
-    offset: Annotated[int, Query(ge=0, le=6000)] = 0,
-    limit: Annotated[int, Query(ge=1, le=40)] = 24,
-) -> MapFeatureCollection:
-    bounds = parse_bbox(bbox, max_span=80)
-    response.headers["Cache-Control"] = "public, max-age=86400"
-    return await municipality_map(session, bounds, offset=offset, limit=limit)
 
 
 @router.get("", response_model=FireHotspotCollection)

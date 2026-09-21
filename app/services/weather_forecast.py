@@ -18,10 +18,12 @@ from app.schemas.weather import WeatherCurrentResponse, WeatherSourceStatusValue
 
 CACHE_SECONDS = 600
 MAX_DATA_AGE = timedelta(hours=2)
+REDIS_TTL_SECONDS = 7200
 _cache: TTLCache[WeatherCurrentResponse] = TTLCache(CACHE_SECONDS, 128)
 _fallback: TTLCache[WeatherCurrentResponse] = TTLCache(7200, 128)
 _failures: TTLCache[bool] = TTLCache(60, 128)
 _request_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
+_revalidating: set[str] = set()
 logger = get_logger(__name__)
 
 
@@ -34,6 +36,31 @@ def _usable(result: WeatherCurrentResponse | None) -> bool:
             for city in result.cities
         )
     )
+
+
+async def _background_revalidate(
+    key: str,
+    locations: tuple[tuple[str, str, float, float], ...],
+    include_forecast: bool,
+) -> None:
+    if key in _revalidating:
+        return
+    _revalidating.add(key)
+    try:
+        async with httpx.AsyncClient(
+            base_url="https://api.open-meteo.com", timeout=20.0
+        ) as client:
+            cities = await fetch_locations(client, locations, include_forecast=include_forecast)
+        result = WeatherCurrentResponse(fetched_at=datetime.now(UTC), cities=cities)
+        if _usable(result):
+            _cache.set(key, result)
+            _fallback.set(key, result)
+            await redis_cache.write("weather", key, result, REDIS_TTL_SECONDS)
+            await redis_cache.write("weather-fallback", key, result, REDIS_TTL_SECONDS)
+    except Exception:
+        logger.warning("weather.revalidation_failed: %s", key, exc_info=True)
+    finally:
+        _revalidating.discard(key)
 
 
 async def get_current(
@@ -51,8 +78,16 @@ async def get_current(
             return cached
         shared = await redis_cache.read("weather", key, WeatherCurrentResponse)
         if shared and _usable(shared):
-            _cache.set(key, shared, ttl_seconds=30)
-            return shared
+            is_fresh = bool(
+                shared.fetched_at
+                and (datetime.now(UTC) - shared.fetched_at) <= timedelta(seconds=CACHE_SECONDS)
+            )
+            if is_fresh:
+                _cache.set(key, shared, ttl_seconds=30)
+                return shared
+            # Stale-While-Revalidate: retorna imediatamente do cache e atualiza em segundo plano
+            asyncio.create_task(_background_revalidate(key, locations, include_forecast))
+            return shared.model_copy(update={"status": WeatherSourceStatusValue.STALE})
         try:
             if _failures.get(key):
                 raise ProviderError("Clima temporariamente indisponível. Tente em um minuto.")
@@ -65,8 +100,8 @@ async def get_current(
                 raise ProviderError("A fonte de clima não retornou condições recentes.")
             _cache.set(key, result)
             _fallback.set(key, result)
-            await redis_cache.write("weather", key, result, CACHE_SECONDS)
-            await redis_cache.write("weather-fallback", key, result, 7200)
+            await redis_cache.write("weather", key, result, REDIS_TTL_SECONDS)
+            await redis_cache.write("weather-fallback", key, result, REDIS_TTL_SECONDS)
             return result
         except ProviderError:
             # Não prolonga o cooldown em cada consulta de um cliente.
@@ -94,7 +129,7 @@ async def get_capitals_current(offset: int, limit: int) -> WeatherCurrentRespons
         key = f"capital:{city.id}:current"
         if result.status == WeatherSourceStatusValue.OK:
             _cache.set(key, entry)
-            await redis_cache.write("weather", key, entry, CACHE_SECONDS)
+            await redis_cache.write("weather", key, entry, REDIS_TTL_SECONDS)
         _fallback.set(key, entry)
     return result.model_copy(
         update={"next_offset": offset + limit if offset + limit < len(ordered) else None}
@@ -162,7 +197,7 @@ async def get_municipalities_current(
         cache_key = f"{city.id}:current"
         if result.status == WeatherSourceStatusValue.OK:
             _cache.set(cache_key, entry)
-            await redis_cache.write("weather", cache_key, entry, CACHE_SECONDS)
+            await redis_cache.write("weather", cache_key, entry, REDIS_TTL_SECONDS)
         _fallback.set(cache_key, entry)
     return result.model_copy(
         update={"cities": cities, "next_offset": offset + limit if more else None}
@@ -187,8 +222,9 @@ async def get_viewport_current(
     known = {}
     missing = []
     for code, name, uf, lat, lon in points:
-        key = f"{code}:current"
-        cached = _cache.get(key) or await redis_cache.read("weather", key, WeatherCurrentResponse)
+        cached = _cache.get(f"{code}:current") or await redis_cache.read(
+            "weather", f"{code}:current", WeatherCurrentResponse
+        )
         if cached and _usable(cached):
             known[code] = cached
         else:
@@ -203,7 +239,7 @@ async def get_viewport_current(
             known[code] = entry
             if result.status == WeatherSourceStatusValue.OK:
                 _cache.set(f"{code}:current", entry)
-                await redis_cache.write("weather", f"{code}:current", entry, CACHE_SECONDS)
+                await redis_cache.write("weather", f"{code}:current", entry, REDIS_TTL_SECONDS)
             _fallback.set(f"{code}:current", entry)
     values = [v for v in known.values() if v.cities]
     if not values:

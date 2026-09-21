@@ -84,11 +84,11 @@ services:
 
   web:
     build:
-      context: ${FRONTEND_CONTEXT:-https://github.com/henriquexaud/brasil-lens-frontend.git#main}
+      context: ${FRONTEND_CONTEXT:-../frontend}
       args:
-        # Assado no bundle: é a URL que o *browser* usa, não a da rede interna
-        # do compose — por isso "localhost" e não "api".
-        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000/api/v1}
+        # Assado no bundle: URL da API para o navegador. Com '/api/v1' (padrão), o
+        # nginx faz proxy reverso para a api interna, funcionando em qualquer IP ou domínio.
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api/v1}
     depends_on:
       - api
     ports:

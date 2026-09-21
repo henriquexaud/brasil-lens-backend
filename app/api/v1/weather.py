@@ -93,7 +93,7 @@ async def get_municipalities_weather(
     session: Annotated[AsyncSession, Depends(get_session)],
     parent: Annotated[str, Query(pattern=r"^\d{2}$")],
     offset: Annotated[int, Query(ge=0, le=6000)] = 0,
-    limit: Annotated[int, Query(ge=1, le=40)] = 40,
+    limit: Annotated[int, Query(ge=1, le=60)] = 40,
 ) -> WeatherCurrentResponse:
     return await get_municipalities_current(session, parent, offset, limit)
 
