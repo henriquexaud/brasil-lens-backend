@@ -587,7 +587,7 @@ O que sustenta esses números:
    `(indicator_id, reference_year) INCLUDE (territory_id, value)`, que torna a
    leitura do mapa index-only.
 4. **GZip + ORJSON**, porque o custo dominante do mapa é transferir bytes.
-5. **Cache TTL em processo** (um dict, sem Redis) para as projeções de leitura,
+5. **Cache TTL em processo** para projeções estáticas e Redis compartilhado para clima e camadas para as projeções de leitura,
    que mudam apenas quando a ingestão roda.
 
 Não há materialized view: o endpoint do mapa lê 27 (ou ≤853) linhas por índice e
@@ -768,7 +768,7 @@ detalhe, drill-down por estado, visualizações salvas (CRUD completo), ingestã
 idempotente com registro de execuções, migrations, testes e lint.
 
 **Deliberadamente fora:** vector tiles, comparação entre territórios, gráficos
-históricos, autenticação, Redis, filas, GraphQL, microserviços. A estrutura para
+históricos, autenticação, filas, GraphQL, microserviços. A estrutura para
 séries históricas existe (`/territories/{code}/indicators` já devolve as séries);
 os gráficos, não.
 
@@ -813,3 +813,79 @@ compatível com dados previamente ingeridos. `/weather/sources` informa o
 estado da ingestão de avisos; `/weather/current` inclui sua própria fonte,
 status e horário de consulta. A API gratuita da Open-Meteo se destina a uso
 não comercial; consulte os termos do provedor para publicação comercial.
+
+### Focos de calor (INPE)
+
+A camada usa os serviços públicos do [BDQueimadas](https://data.inpe.br/queimadas/bdqueimadas/),
+sem chave ou cadastro. O frontend atualiza a consulta a cada dez minutos enquanto
+ela estiver ativa em **Clima e meio ambiente → Camadas e fontes**. A atualização
+acompanha a publicação do INPE; uma detecção por satélite não confirma que o fogo
+continua ativo e várias detecções podem corresponder ao mesmo evento.
+
+- `GET /api/v1/fire-hotspots?level=country&hours=48`: contagem completa, horários,
+  configuração WMS e uma prévia com a detecção mais recente. `features` **não** é
+  o conjunto completo. O mapa aberto usa agregação completa; o WMS desenha os
+  pontos reais apenas no zoom próximo, sem um limite artificial de detecções.
+- `level=state&parent=15` ou `level=municipality&parent=1504604`: filtro pelos
+  códigos IBGE nativos do INPE (`id_1`/`id_2`), sempre restrito ao Brasil (`id_0=33`).
+  Um território inexistente retorna 404; recortes incompatíveis retornam 400.
+- `GET /api/v1/fire-hotspots/identify`: recebe `latitude`, `longitude`, `tolerance`
+  em graus (até 0,5), `at` igual ao `metadata.windowEnd` e os mesmos filtros.
+  Retorna até 20 detecções recentes próximas ao clique e a contagem total da área;
+  os resultados são ordenados por proximidade. Não carrega detalhes ao abrir o mapa.
+
+O WFS oficial é `https://data.inpe.br/queimadas/geoserver/wfs`, camada
+`bdqueimadas:focos`. O WMS usa o mesmo caminho com `/wms`. As URLs e o timeout
+podem ser alterados por `INPE_QUEIMADAS_WFS_URL`, `INPE_QUEIMADAS_WMS_URL` e
+`INPE_QUEIMADAS_HTTP_TIMEOUT`. TLS permanece verificado. Não há dependência NASA FIRMS.
+
+O cache de metadados dura dez minutos e deduplica consultas simultâneas. Falha
+da fonte retorna 502, nunca um falso resultado vazio. Uma consulta anterior de
+até uma hora pode ser devolvida com `status=stale`, preservando período e horários.
+O mapa usa o mesmo período da contagem e da consulta pontual. Ausências e sentinelas
+negativas são normalizadas para `null`; risco de fogo permanece um índice, não uma
+porcentagem. FRP é potência radiativa em MW, não área queimada.
+
+- `GET /api/v1/fire-hotspots/summary`: mesmos filtros e `at=metadata.windowEnd`.
+  Lê o WFS em CSV paginado, valida contagem e IDs únicos e devolve estatísticas
+  de estados e municípios. `density = count × 1000 / areaKm2`.
+  A área de cada estado/município é geodésica, calculada no PostGIS sobre sua malha **canônica** IBGE (não
+  sobre o LOD simplificado); `areaSource` explicita essa metodologia. Área ausente
+  gera densidade nula. Contagens de 24h e do período, última detecção e registros
+  sem município reconhecido são preservados. Falha de paginação retorna 502.
+- `GET /api/v1/fire-hotspots/municipalities?bbox=west,south,east,north`: apenas
+  limites municipais canônicos paginados (`offset`, `limit`, `nextOffset`), sem focos individuais.
+- `GET /api/v1/hydrography?zoom=4&bbox=...&include_water_bodies=false`: rios por
+  área de drenagem e simplificação por escala. `include_rivers=false` permite buscar
+  polígonos de lagos separadamente, depois dos rios. A ANA é consultada por IDs em
+  páginas completas; falha transitória devolve `status=partial`, sem cache de 24h.
+
+Os coropléticos estadual e municipal usam a mesma escala quantitativa de focos
+por 1.000 km²; não representam extensão queimada. Não há comparação
+com período anterior sem uma segunda janela validada.
+
+
+### Municípios visíveis, localização e Redis
+
+- `POST /api/v1/territories/locate`, corpo `{ "latitude": -23.55, "longitude": -46.63 }`:
+  município que contém o ponto (`ST_Covers` da malha canônica), pai e bbox. Consulta
+  local, sem geocoder externo, sem cache e sem coordenadas na URL de access logs.
+- `GET /api/v1/weather/municipal-boundaries?bbox=...&offset=0&limit=24`: malhas
+  **canônicas** visíveis, incluindo vizinhos de outras UFs. Alternativamente,
+  `parent=35` pagina a UF (capital primeiro) e `code=3550308` busca a seleção.
+  `nextOffset=null` indica fim; limite máximo de 40 geometrias por resposta.
+  A consulta preserva as coordenadas da ingestão, sem simplificar nem recortar
+  os polígonos. A chave de cache distingue recorte, código e página.
+- `GET /api/v1/weather/capitals?offset=0&limit=6`: condições atuais das capitais,
+  primeiro com cobertura das cinco regiões, depois completando as 27 UFs.
+  Selecionar uma UF consulta apenas sua capital e reutiliza o cache do lote.
+- `GET /api/v1/weather/viewport?bbox=...&offset=0&limit=20`: clima atual paginado
+  dos municípios que intersectam o viewport, começando pelo centro. Reutiliza cache
+  individual e só busca os municípios faltantes, sempre sem previsão diária.
+
+O Compose inicia Redis na rede interna, sem porta pública, com volume AOF, limite
+256 MB e política allkeys-lru. `REDIS_URL` configura o serviço; vazio mantém fallback
+local. Chaves versionadas e comprimidas guardam clima (10 min), fallback (até 2h),
+metadados INPE (10 min), resumo de intervalo (2h) e malhas/hidrografia (24h).
+Falha ou timeout de Redis não bloqueia a fonte; TTLs e idade de observação continuam
+validados. Geolocalização precisa não é persistida nesse cache.

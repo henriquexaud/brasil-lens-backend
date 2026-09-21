@@ -65,7 +65,7 @@ Validei as fontes antes de escrever o provider. Resultados:
 - Vector tiles / viewport / bbox: com LOD pré-computado, 27 estados cabem em ~40 KB
   gzip e 853 municípios em ~600 KB. Tiles resolveriam um problema que ainda não existe.
 - Materialized views: ver §8.
-- Redis, filas, autenticação, CQRS, `use_cases/`, `gateways/`: fora do escopo e sem
+- Filas, autenticação, CQRS, `use_cases/`, `gateways/`: fora do escopo e sem
   problema concreto a resolver.
 - Tabela de agregação hierárquica: o IBGE já publica os níveis N1 (Brasil), N2 (região),
   N3 (UF) e N6 (município). Não há necessidade de somar filhos.
@@ -134,7 +134,7 @@ brasil-lens-backend/              ← projeto principal
 │   │   ├── config.py             # Settings (pydantic-settings)
 │   │   ├── logging.py            # logging estruturado
 │   │   ├── errors.py             # exceções de domínio + envelope de erro
-│   │   └── cache.py              # cache TTL em processo (sem Redis)
+│   │   └── cache.py              # cache TTL local; redis_cache.py compartilha dados de contexto
 │   ├── db/{base,session}.py
 │   ├── models/                   # SQLAlchemy 2.0 (Mapped/mapped_column)
 │   ├── schemas/                  # Pydantic v2 (contratos da API)
@@ -957,3 +957,49 @@ Avisos oficiais continuam ingeridos pelo INMET em laço independente. As
 camadas de avisos e temperaturas não interceptam os eventos das divisas. Os
 jobs de estações INMET e CEMADEN permanecem como CLI legada, fora da atualização
 automática e do catálogo de fontes disponíveis, até terem leituras verificáveis.
+
+### Focos INPE: cobertura completa e detalhe sob demanda
+
+O BDQueimadas publica dezenas de milhares de detecções em uma janela de 48 horas.
+A camada reutiliza a pintura territorial: estados na visão Brasil e municípios
+ao entrar na UF, com a mesma densidade por área; WMS acrescenta detecções pontuais
+apenas no zoom próximo. O WFS
+alimenta contagem, agregação paginada e identificação pontual. Assim, não transfere o conjunto inteiro para o navegador nem apresenta
+uma amostra limitada como se fosse cobertura completa. As requisições WMS saem
+diretamente para o serviço público do INPE, com estilo SLD discreto, filtro e
+intervalo fornecidos pela API. O pane não intercepta seleção ou duplo clique dos
+territórios. O clique simples consulta apenas o entorno visível do ponto.
+
+O filtro territorial usa códigos nativos (país 33, UF `id_1`, município `id_2`)
+em vez de retângulos que poderiam incluir regiões vizinhas. A API valida a
+existência e o nível do código IBGE antes da consulta. O intervalo tem início e
+fim fixos, compartilhados entre tiles, contagem e detalhes. Falhas são diferentes
+de zero detecções; fallback tem prazo e marcação explícitos. O frontend cancela
+consultas ao sair da camada, não reaproveita dados de outro recorte como placeholder
+e só atualiza enquanto estiver ativo. A cobertura acompanha o recorte do mapa;
+selecionar uma cidade dentro dele não refaz a camada inteira.
+
+
+A agregação verifica todas as páginas CSV, unicidade dos IDs e a contagem após a
+leitura. Ela compartilha o intervalo dos metadados, guarda o resultado por intervalo
+e evita consultas concorrentes iguais. Municípios sem área canônica não recebem
+uma densidade fictícia. A consulta espacial das malhas usa o índice PostGIS e o LOD
+detail no zoom próximo; nomes e coordenadas brutas de dezenas de milhares de focos não chegam ao
+browser. Estados e municípios usam limites fixos entre recortes, calculados sobre
+a respectiva malha canônica.
+
+Hidrografia é o último estágio: aguarda mapa, fogo, cobertura climática e auxiliares;
+rios simplificados aparecem antes de lagos. No zoom nacional, apenas 18 eixos do
+snapshot atendem ao filtro de drenagem de 200.000 km². As faixas seguintes reduzem
+os limiares e tolerâncias. O backend recorta linhas no viewport e consulta polígonos
+por área de superfície, em páginas de IDs da ANA. Desligar a camada cancela trabalho
+pendente; nenhuma geometria do viewport anterior aparece como placeholder.
+
+
+Redis complementa caches locais das fontes e compartilha resultados entre usuários
+ou reinícios. Os valores tipados são comprimidos, versionados e expiram conforme o
+produto. Timeouts curtos/cooldown evitam bloquear a API se o cache cair. Localização
+usa POST e ST_Covers no PostGIS; não é persistida em Redis. O viewport municipal
+consulta apenas condições atuais, pagina por proximidade e aquece chaves individuais
+para reaproveitar seleção e arrastos subsequentes. A camada de clima tem prioridade
+no carregamento; fogo prevalece visualmente assim que clima e resumo estiverem prontos.

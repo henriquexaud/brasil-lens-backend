@@ -7,6 +7,7 @@ from weakref import WeakValueDictionary
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import redis_cache
 from app.core.cache import TTLCache
 from app.core.errors import InvalidParameterError, ProviderError, TerritoryNotFoundError
 from app.core.logging import get_logger
@@ -48,6 +49,10 @@ async def get_current(
         cached = _cache.get(key)
         if cached and _usable(cached):
             return cached
+        shared = await redis_cache.read("weather", key, WeatherCurrentResponse)
+        if shared and _usable(shared):
+            _cache.set(key, shared, ttl_seconds=30)
+            return shared
         try:
             if _failures.get(key):
                 raise ProviderError("Clima temporariamente indisponível. Tente em um minuto.")
@@ -60,16 +65,40 @@ async def get_current(
                 raise ProviderError("A fonte de clima não retornou condições recentes.")
             _cache.set(key, result)
             _fallback.set(key, result)
+            await redis_cache.write("weather", key, result, CACHE_SECONDS)
+            await redis_cache.write("weather-fallback", key, result, 7200)
             return result
         except ProviderError:
             # Não prolonga o cooldown em cada consulta de um cliente.
             if not _failures.get(key):
                 _failures.set(key, True)
                 logger.warning("weather.open_meteo_unavailable", exc_info=True)
-            previous = _fallback.get(key)
+            previous = _fallback.get(key) or await redis_cache.read(
+                "weather-fallback", key, WeatherCurrentResponse
+            )
             if previous and _usable(previous):
                 return previous.model_copy(update={"status": WeatherSourceStatusValue.STALE})
             raise
+
+
+async def get_capitals_current(offset: int, limit: int) -> WeatherCurrentResponse:
+    # Primeiro lote cobre as cinco regiões; os demais completam as 27 UFs.
+    first = ("SP", "AM", "BA", "DF", "RS", "PE")
+    ordered = sorted(CAPITALS, key=lambda city: first.index(city[0]) if city[0] in first else 6)
+    locations = tuple(ordered[offset : offset + limit])
+    if not locations:
+        return WeatherCurrentResponse(fetched_at=datetime.now(UTC), cities=[])
+    result = await get_current(f"capitals:{offset}:{limit}", locations, include_forecast=False)
+    for city in result.cities:
+        entry = result.model_copy(update={"cities": [city]})
+        key = f"capital:{city.id}:current"
+        if result.status == WeatherSourceStatusValue.OK:
+            _cache.set(key, entry)
+            await redis_cache.write("weather", key, entry, CACHE_SECONDS)
+        _fallback.set(key, entry)
+    return result.model_copy(
+        update={"next_offset": offset + limit if offset + limit < len(ordered) else None}
+    )
 
 
 async def get_territory_current(
@@ -83,9 +112,8 @@ async def get_territory_current(
         capital = next((c for c in CAPITALS if c[0] == territory.abbreviation), None)
         if capital is None:
             raise InvalidParameterError("Capital não encontrada para este estado.")
-        national = await get_current(include_forecast=include_forecast)
-        return national.model_copy(
-            update={"cities": [city for city in national.cities if city.id == capital[0]]}
+        return await get_current(
+            f"capital:{capital[0]}", (capital,), include_forecast=include_forecast
         )
     if territory.level != TerritoryLevel.MUNICIPALITY:
         raise InvalidParameterError("Selecione um estado ou município.", parameter="territory")
@@ -134,7 +162,54 @@ async def get_municipalities_current(
         cache_key = f"{city.id}:current"
         if result.status == WeatherSourceStatusValue.OK:
             _cache.set(cache_key, entry)
+            await redis_cache.write("weather", cache_key, entry, CACHE_SECONDS)
         _fallback.set(cache_key, entry)
     return result.model_copy(
         update={"cities": cities, "next_offset": offset + limit if more else None}
+    )
+
+
+async def get_viewport_current(
+    session: AsyncSession,
+    bbox: tuple[float, float, float, float],
+    offset: int,
+    limit: int,
+) -> WeatherCurrentResponse:
+    from app.repositories.viewport import weather_points
+
+    points = await weather_points(session, bbox, offset, limit + 1)
+    more = len(points) > limit
+    points = points[:limit]
+    if not points:
+        return WeatherCurrentResponse(fetched_at=datetime.now(UTC), cities=[])
+    # Reaproveita por município, inclusive entre viewports e entre usuários.
+    known = {}
+    missing = []
+    for code, name, uf, lat, lon in points:
+        key = f"{code}:current"
+        cached = _cache.get(key) or await redis_cache.read("weather", key, WeatherCurrentResponse)
+        if cached and _usable(cached):
+            known[code] = cached
+        else:
+            missing.append((code, name, uf, lat, lon))
+    if missing:
+        locations = tuple((uf, name, lat, lon) for _, name, uf, lat, lon in missing)
+        key = "viewport:" + ":".join(item[0] for item in missing)
+        result = await get_current(key, locations, include_forecast=False)
+        for point, city in zip(missing, result.cities, strict=True):
+            code = point[0]
+            entry = result.model_copy(update={"cities": [city.model_copy(update={"id": code})]})
+            known[code] = entry
+            if result.status == WeatherSourceStatusValue.OK:
+                _cache.set(f"{code}:current", entry)
+                await redis_cache.write("weather", f"{code}:current", entry, CACHE_SECONDS)
+            _fallback.set(f"{code}:current", entry)
+    values = list(known.values())
+    return WeatherCurrentResponse(
+        fetched_at=min(item.fetched_at for item in values),
+        status=WeatherSourceStatusValue.STALE
+        if any(item.status == WeatherSourceStatusValue.STALE for item in values)
+        else WeatherSourceStatusValue.OK,
+        cities=[known[point[0]].cities[0].model_copy(update={"id": point[0]}) for point in points],
+        next_offset=offset + limit if more else None,
     )

@@ -2,7 +2,6 @@
 
 from unittest.mock import AsyncMock
 
-import httpx
 import pytest
 
 from app.schemas.hydrography import HydroFeatureCollection
@@ -120,16 +119,35 @@ def test_major_rivers_snapshot_loaded_and_sorted() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_hydrography_country_returns_instant_complete_rivers() -> None:
+async def test_country_only_returns_major_axes_with_reduced_geometry() -> None:
     session = AsyncMock()
-    result = await service.get_hydrography(
-        session, level="country", include_water_bodies=False
-    )
+    result = await service.get_hydrography(session, level="country", include_water_bodies=False)
     assert isinstance(result, HydroFeatureCollection)
     assert result.metadata.level == "country"
-    assert result.metadata.river_count >= 50
-    # Checa que Rio São Francisco e Rio Paraná estão completos
+    assert 0 < result.metadata.river_count < len(service._MAJOR_RIVERS)
+    assert len(result.model_dump_json()) < 200000
+    assert all((feature.properties.drainage_area_km2 or 0) >= 200000 for feature in result.features)
+    # Eixos principais persistem, tributários menores esperam o zoom.
     names = {f.properties.name for f in result.features}
     assert "Rio São Francisco" in names
     assert "Rio Paraná" in names
-    assert "Rio Tietê" in names
+    assert "Rio Tietê" not in names
+
+
+def test_viewport_clipping_and_simplification_preserve_crossing_rivers():
+    bbox = (0, 0, 1, 1)
+    # Nenhum vértice dentro: o segmento ainda cruza o viewport e deve aparecer.
+    assert service._clip_line([[-1, 0.5], [2, 0.5]], bbox) == [[[0, 0.5], [1, 0.5]]]
+    assert service._clip_line([[-1, -1], [-2, -2]], bbox) == []
+    points = [[0, 0], [0.25, 0.001], [0.5, 0], [0.75, -0.001], [1, 0]]
+    assert service._simplify_line(points, 0.01) == [[0, 0], [1, 0]]
+    assert len(service._simplify_line(points, 0.0001)) > 2
+
+
+def test_zoom_filters_reduce_tributaries_and_small_lakes_at_country_scale():
+    country = service.hydro_detail(4)
+    state = service.hydro_detail(6)
+    local = service.hydro_detail(10)
+    assert country[0] > state[0] > local[0]
+    assert country[1] > state[1] > local[1]
+    assert country[2] > state[2] > local[2]

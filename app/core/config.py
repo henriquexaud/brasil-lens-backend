@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     # Cache em processo das projeções de leitura. Não é infraestrutura: é um dict
     # com TTL. Os dados só mudam durante a ingestão, então todas as sessões pedem
     # exatamente a mesma resposta de mapa. 0 desliga.
+    redis_url: str | None = None
+    redis_cache_prefix: str = "brasil-lens:v3"
     read_cache_ttl_seconds: int = 300
     read_cache_max_entries: int = 64
     # Teto de features por entrada cacheada. Uma projeção municipal completa
@@ -72,6 +74,12 @@ class Settings(BaseSettings):
     # cada poll do frontend durante picos de tráfego.
     weather_stations_cache_ttl_seconds: int = 90
     weather_alerts_cache_ttl_seconds: int = 90
+
+    # Focos INPE — mesmos serviços públicos usados pelo BDQueimadas, sem chave.
+    inpe_queimadas_wfs_url: str = "https://data.inpe.br/queimadas/geoserver/wfs"
+    inpe_queimadas_wms_url: str = "https://data.inpe.br/queimadas/geoserver/wms"
+    inpe_queimadas_http_timeout: float = 30.0
+    fire_hotspots_cache_ttl_seconds: int = 600
 
     # Tolerâncias de ST_SimplifyPreserveTopology, em graus (SRID 4326).
     # 0.02° ~ 2 km: suficiente para o Brasil inteiro em zoom 4.

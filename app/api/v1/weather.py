@@ -8,10 +8,13 @@ temáticas que façam sentido sobrepor".
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_session
+from app.core.errors import InvalidParameterError
+from app.repositories.fire import municipality_map
+from app.schemas.map import MapFeatureCollection
 from app.schemas.weather import (
     WeatherAlertCollection,
     WeatherCurrentResponse,
@@ -19,10 +22,13 @@ from app.schemas.weather import (
     WeatherStationCollection,
 )
 from app.services import weather as weather_service
+from app.services.viewport import parse_bbox
 from app.services.weather_forecast import (
+    get_capitals_current,
     get_current,
     get_municipalities_current,
     get_territory_current,
+    get_viewport_current,
 )
 
 router = APIRouter(prefix="/weather", tags=["weather"])
@@ -90,3 +96,44 @@ async def get_municipalities_weather(
     limit: Annotated[int, Query(ge=1, le=40)] = 40,
 ) -> WeatherCurrentResponse:
     return await get_municipalities_current(session, parent, offset, limit)
+
+
+@router.get("/viewport", response_model=WeatherCurrentResponse)
+async def viewport_weather(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    bbox: str,
+    offset: Annotated[int, Query(ge=0, le=6000)] = 0,
+    limit: Annotated[int, Query(ge=1, le=40)] = 20,
+) -> WeatherCurrentResponse:
+    return await get_viewport_current(session, parse_bbox(bbox, max_span=20), offset, limit)
+
+
+@router.get("/municipal-boundaries", response_model=MapFeatureCollection)
+async def viewport_boundaries(
+    response: Response,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    bbox: str | None = None,
+    parent: Annotated[str | None, Query(pattern=r"^\d{2}$")] = None,
+    code: Annotated[str | None, Query(pattern=r"^\d{7}$")] = None,
+    offset: Annotated[int, Query(ge=0, le=6000)] = 0,
+    limit: Annotated[int, Query(ge=1, le=40)] = 24,
+) -> MapFeatureCollection:
+    if not (bbox or parent or code):
+        raise InvalidParameterError("Informe um estado, município ou área visível.", "bbox")
+    response.headers["Cache-Control"] = "public, max-age=86400"
+    return await municipality_map(
+        session,
+        parse_bbox(bbox, max_span=80) if bbox else None,
+        parent=parent,
+        code=code,
+        offset=offset,
+        limit=limit,
+    )
+
+
+@router.get("/capitals", response_model=WeatherCurrentResponse)
+async def capitals_weather(
+    offset: Annotated[int, Query(ge=0, le=27)] = 0,
+    limit: Annotated[int, Query(ge=1, le=9)] = 6,
+) -> WeatherCurrentResponse:
+    return await get_capitals_current(offset, limit)

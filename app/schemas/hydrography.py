@@ -20,6 +20,7 @@ class HydroFeatureProperties(CamelModel):
     name: str
     category: HydroCategory
     drainage_area_km2: float | None = None
+    area_km2: float | None = None
     dominion: str | None = None
     management: str | None = None
     body_type: str | None = None
@@ -34,10 +35,10 @@ class HydroFeature(CamelModel):
     bbox: tuple[float, float, float, float] | None = None
 
 
-
 class HydroMetadata(CamelModel):
     level: str
     parent_code: str | None = None
+    status: Literal["ok", "partial"] = "ok"
     river_count: int
     water_body_count: int
     source: str = "ANA - Agência Nacional de Águas e Saneamento Básico / SNIRH"
@@ -55,4 +56,3 @@ class HydroFeatureCollection(CamelModel):
         if data.get("bbox") is None:
             data.pop("bbox", None)
         return data
-

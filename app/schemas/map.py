@@ -103,6 +103,7 @@ class MapFeatureCollection(CamelModel):
     classification: MapClassification | None = None
     bbox: tuple[float, float, float, float] | None = None
     features: list[MapFeature]
+    next_offset: int | None = None
 
     @model_serializer(mode="wrap")
     def _serialize(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pydantic import Field
+
 from app.models import IndicatorOrigin, TerritoryLevel
 from app.schemas.common import ApiDecimal, CamelModel, Pagination
 
@@ -60,3 +62,8 @@ class TerritoryOverview(TerritoryDetail):
     """Resposta pronta para a tela de detalhe: um request, nenhuma junção no cliente."""
 
     indicators: list[IndicatorValueOut]
+
+
+class LocationInput(CamelModel):
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)

@@ -25,6 +25,7 @@ from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.errors import DomainError, error_body
 from app.core.logging import configure_logging, get_logger
+from app.core.redis_cache import close as close_redis
 from app.db.session import dispose_engine
 from app.jobs import weather_scheduler
 
@@ -42,6 +43,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     yield
     await weather_scheduler.stop()
     await dispose_engine()
+    await close_redis()
     logger.info("api.shutdown")
 
 

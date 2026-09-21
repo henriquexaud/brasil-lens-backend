@@ -34,12 +34,26 @@ services:
       timeout: 5s
       retries: 20
 
+  redis:
+    image: redis:7.4-alpine
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   api:
     build: .
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
     environment:
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-brasil_lens}:${POSTGRES_PASSWORD:-brasil_lens}@db:5432/${POSTGRES_DB:-brasil_lens}
       APP_ENV: ${APP_ENV:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
@@ -82,3 +96,4 @@ services:
 
 volumes:
   pgdata:
+  redisdata:

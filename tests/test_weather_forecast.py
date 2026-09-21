@@ -164,13 +164,13 @@ async def test_weather_state_uses_its_capital(session, monkeypatch: pytest.Monke
         service,
         "get_current",
         AsyncMock(
-            return_value=WeatherCurrentResponse(
-                fetched_at=datetime.now(UTC), cities=[city(), capital]
-            )
+            return_value=WeatherCurrentResponse(fetched_at=datetime.now(UTC), cities=[capital])
         ),
     )
     result = await service.get_territory_current(session, "35")
     assert [entry.name for entry in result.cities] == ["São Paulo"]
+    assert service.get_current.call_args.args[0] == "capital:SP"
+    assert len(service.get_current.call_args.args[1]) == 1
 
 
 @pytest.mark.db
@@ -304,3 +304,20 @@ async def test_batch_endpoint_limits_and_required_scope() -> None:
     ) as client:
         for query in ["", "?parent=3509502", "?parent=35&limit=1000", "?parent=35&offset=-1"]:
             assert (await client.get(f"/api/v1/weather/municipalities{query}")).status_code == 422
+
+
+async def test_capitals_load_in_small_batches_and_warm_selection(monkeypatch):
+    async def fetch(client, locations, *, include_forecast):
+        assert include_forecast is False
+        return [open_meteo._parse_city(payload(), location) for location in locations]
+
+    mocked = AsyncMock(side_effect=fetch)
+    monkeypatch.setattr(service, "fetch_locations", mocked)
+    pages = [await service.get_capitals_current(offset, 6) for offset in range(0, 27, 6)]
+    assert len(pages[0].cities) == 6
+    assert {city.id for city in pages[0].cities} == {"SP", "AM", "BA", "DF", "RS", "PE"}
+    assert [page.next_offset for page in pages] == [6, 12, 18, 24, None]
+    assert len({city.id for page in pages for city in page.cities}) == 27
+    selected = await service.get_current("capital:SP", (), include_forecast=False)
+    assert selected.cities[0].id == "SP"
+    assert mocked.await_count == 5, "selecionar uma UF já carregada não busca as 27 capitais"

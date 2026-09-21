@@ -1,11 +1,4 @@
-"""Cache TTL em processo para as projeções de leitura.
-
-Justificativa: os dados mudam apenas durante a ingestão e a primeira requisição
-de todo usuário é a mesma (`/map?level=state&indicator=...&year=latest`). Um dict
-com TTL e limite de entradas resolve isso sem introduzir Redis. Quando existirem
-múltiplas réplicas da API, cada uma mantém sua própria cópia — aceitável, porque
-o conteúdo é idêntico e imutável entre ingestões.
-"""
+"""Cache TTL local de leitura; Redis complementa dados públicos em redis_cache.py."""
 
 from __future__ import annotations
 

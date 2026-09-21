@@ -44,7 +44,7 @@ class TerritoryLevel(str, enum.Enum):
 class GeometryLOD(str, enum.Enum):
     """Níveis de detalhe geométrico.
 
-    `CANONICAL` é a malha oficial do IBGE e nunca é servida ao browser.
+    `CANONICAL` é a malha oficial do IBGE, servida em páginas pequenas no clima.
     Os demais são derivados na ingestão (ver docs/ARCHITECTURE.md §5).
     """
 

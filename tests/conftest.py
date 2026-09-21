@@ -31,6 +31,13 @@ def load_fixture(name: str) -> Any:
         return json.load(handle)
 
 
+@pytest.fixture(autouse=True)
+def isolate_shared_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Fixtures de fontes externas não podem ler/gravar o cache da aplicação local.
+    # Os testes de Redis injetam seu próprio cliente em memória.
+    monkeypatch.setattr(settings, "redis_url", None)
+
+
 @pytest.fixture(scope="session")
 def anyio_backend() -> str:
     return "asyncio"
