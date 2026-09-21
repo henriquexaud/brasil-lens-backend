@@ -89,5 +89,6 @@ class FireSummary(CamelModel):
     total: int
     municipalities: list[FireMunicipality]
     states: list[FireMunicipality] = Field(default_factory=list)
+    ranked_municipalities: list[FireMunicipality] = Field(default_factory=list)
     unassigned_count: int = 0
     area_source: str = "Área geodésica calculada sobre a malha territorial original do IBGE"

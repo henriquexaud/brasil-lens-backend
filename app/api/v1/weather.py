@@ -27,6 +27,7 @@ from app.services.weather_forecast import (
     get_capitals_current,
     get_current,
     get_municipalities_current,
+    get_state_weather,
     get_territory_current,
     get_viewport_current,
 )
@@ -96,6 +97,18 @@ async def get_municipalities_weather(
     limit: Annotated[int, Query(ge=1, le=60)] = 40,
 ) -> WeatherCurrentResponse:
     return await get_municipalities_current(session, parent, offset, limit)
+
+
+@router.get(
+    "/state",
+    response_model=WeatherCurrentResponse,
+    summary="Condições climáticas completas de um estado com interpolação espacial no servidor",
+)
+async def get_state_weather_endpoint(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    parent: Annotated[str, Query(pattern=r"^\d{2}$")],
+) -> WeatherCurrentResponse:
+    return await get_state_weather(session, parent)
 
 
 @router.get("/viewport", response_model=WeatherCurrentResponse)

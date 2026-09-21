@@ -7,13 +7,20 @@ não há dado, como classificar) mora aqui — isso é responsabilidade do servi
 from __future__ import annotations
 
 import math
+import unicodedata
 from dataclasses import dataclass
 
-from sqlalchemy import Select, and_, func, select
+from sqlalchemy import Select, and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.models import GeometryLOD, Territory, TerritoryGeometry, TerritoryLevel
+
+
+def _normalize_text(text: str) -> str:
+    return "".join(
+        c for c in unicodedata.normalize("NFD", text) if unicodedata.category(c) != "Mn"
+    ).lower().strip()
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,10 +141,44 @@ async def list_territories(
             parent_filter.ibge_code == parent_ibge_code
         )
     if search:
-        # unaccent exigiria extensão extra; ILIKE resolve o MVP de forma previsível.
-        stmt = stmt.where(Territory.name.ilike(f"%{search}%"))
+        clean = _normalize_text(search)
+        name_col = func.coalesce(Territory.normalized_name, func.lower(Territory.name))
+        abbr_col = func.coalesce(Territory.normalized_abbreviation, func.lower(Territory.abbreviation))
 
-    stmt = stmt.order_by(Territory.name).limit(limit).offset(offset)
+        # Filtro: casa termo no nome, sigla exata ou início da sigla
+        stmt = stmt.where(
+            or_(
+                name_col.contains(clean),
+                abbr_col == clean,
+                abbr_col.startswith(clean),
+            )
+        )
+
+        # Pontuação de relevância (menor score = maior prioridade):
+        # 0: Sigla exata ("SP")
+        # 1: Nome exato ("sao paulo")
+        # 2: Nome começa com termo ("sao")
+        # 3: Palavra no meio do nome começa com o termo ("paulo" em "São Paulo")
+        # 4: Sigla começa com o termo
+        # 5: Termo contido no meio do nome
+        score = case(
+            (abbr_col == clean, 0),
+            (name_col == clean, 1),
+            (name_col.startswith(clean), 2),
+            (name_col.like(f"% {clean}%"), 3),
+            (abbr_col.startswith(clean), 4),
+            else_=5,
+        )
+        stmt = stmt.order_by(
+            score,
+            case((Territory.level == TerritoryLevel.STATE, 0), else_=1),
+            func.length(Territory.name),
+            Territory.name,
+        )
+    else:
+        stmt = stmt.order_by(Territory.name)
+
+    stmt = stmt.limit(limit).offset(offset)
     return [_to_row(record) for record in (await session.execute(stmt)).all()]
 
 
@@ -157,7 +198,16 @@ async def count_territories(
             parent_filter.ibge_code == parent_ibge_code
         )
     if search:
-        stmt = stmt.where(Territory.name.ilike(f"%{search}%"))
+        clean = _normalize_text(search)
+        name_col = func.coalesce(Territory.normalized_name, func.lower(Territory.name))
+        abbr_col = func.coalesce(Territory.normalized_abbreviation, func.lower(Territory.abbreviation))
+        stmt = stmt.where(
+            or_(
+                name_col.contains(clean),
+                abbr_col == clean,
+                abbr_col.startswith(clean),
+            )
+        )
     return (await session.execute(stmt)).scalar_one()
 
 

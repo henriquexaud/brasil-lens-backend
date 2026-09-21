@@ -10,10 +10,11 @@ recorte territorial nem classe de quantil — ver `docs/ARCHITECTURE.md`
 from __future__ import annotations
 
 import enum
+import math
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import Field, FiniteFloat
+from pydantic import Field, FiniteFloat, model_validator
 
 from app.schemas.common import ApiDecimal, CamelModel
 
@@ -121,6 +122,62 @@ class WeatherCity(CamelModel):
     precipitation_interval_minutes: int
     weather_code: int | None
     forecast: list[WeatherForecastDay]
+    is_inferred: bool = False
+
+
+class WeatherSummary(CamelModel):
+    min_temperature: float | None = None
+    max_temperature: float | None = None
+    max_rainfall: float | None = None
+    hottest: list[WeatherCity] = Field(default_factory=list)
+    coldest: list[WeatherCity] = Field(default_factory=list)
+    ranked_rainfall: list[WeatherCity] = Field(default_factory=list)
+
+
+def build_weather_summary(cities: list[WeatherCity]) -> WeatherSummary:
+    valid_temps = [
+        c for c in cities
+        if c.temperature_c is not None and math.isfinite(c.temperature_c)
+    ]
+    if not valid_temps:
+        hottest: list[WeatherCity] = []
+        coldest: list[WeatherCity] = []
+        min_temp = None
+        max_temp = None
+    else:
+        temps = [c.temperature_c for c in valid_temps]
+        min_temp = min(temps)
+        max_temp = max(temps)
+        sorted_desc = sorted(valid_temps, key=lambda c: c.temperature_c, reverse=True)
+        if len(valid_temps) == 1:
+            hottest = [sorted_desc[0]]
+            coldest = []
+        elif len(valid_temps) == 2:
+            hottest = [sorted_desc[0]]
+            coldest = [sorted_desc[1]]
+        else:
+            max_per_group = min(3, len(valid_temps) // 2 or 1)
+            hottest = sorted_desc[:max_per_group]
+            hottest_ids = {c.id for c in hottest}
+            sorted_asc = sorted(valid_temps, key=lambda c: c.temperature_c)
+            coldest = [c for c in sorted_asc if c.id not in hottest_ids][:max_per_group]
+
+    def _rain_val(c: WeatherCity) -> float:
+        val = c.precipitation_sum_mm if c.precipitation_sum_mm is not None else c.precipitation_mm
+        return float(val) if val is not None and math.isfinite(val) else 0.0
+
+    valid_rain = [c for c in cities if _rain_val(c) > 0]
+    ranked_rainfall = sorted(valid_rain, key=_rain_val, reverse=True)[:5]
+    max_rainfall = _rain_val(ranked_rainfall[0]) if ranked_rainfall else None
+
+    return WeatherSummary(
+        min_temperature=min_temp,
+        max_temperature=max_temp,
+        max_rainfall=max_rainfall,
+        hottest=hottest,
+        coldest=coldest,
+        ranked_rainfall=ranked_rainfall,
+    )
 
 
 class WeatherCurrentResponse(CamelModel):
@@ -129,4 +186,11 @@ class WeatherCurrentResponse(CamelModel):
     fetched_at: datetime
     status: WeatherSourceStatusValue = WeatherSourceStatusValue.OK
     cities: list[WeatherCity]
+    summary: WeatherSummary | None = None
     next_offset: int | None = None
+
+    @model_validator(mode="after")
+    def populate_summary(self) -> WeatherCurrentResponse:
+        if self.summary is None and self.cities:
+            self.summary = build_weather_summary(self.cities)
+        return self

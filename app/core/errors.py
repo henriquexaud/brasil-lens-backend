@@ -80,6 +80,22 @@ class ProviderError(DomainError):
     code = "provider_error"
 
 
+class ProviderRateLimitedError(ProviderError):
+    """A fonte recusou a consulta por cota (HTTP 429).
+
+    Diferente de uma queda: insistir não ajuda, só esperar. O tempo de espera
+    vai em `retryAfterSeconds` para o cliente — e o próprio serviço — saberem
+    quando voltar a tentar.
+    """
+
+    status_code = 503
+    code = "provider_rate_limited"
+
+    def __init__(self, message: str, retry_after_seconds: int) -> None:
+        super().__init__(message, retryAfterSeconds=retry_after_seconds)
+        self.retry_after_seconds = retry_after_seconds
+
+
 def error_body(code: str, message: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
     body: dict[str, Any] = {"error": {"code": code, "message": message}}
     if details:

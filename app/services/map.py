@@ -43,7 +43,7 @@ logger = get_logger(__name__)
 _DEFAULT_LOD: dict[TerritoryLevel, GeometryLOD] = {
     TerritoryLevel.COUNTRY: GeometryLOD.OVERVIEW,
     TerritoryLevel.REGION: GeometryLOD.OVERVIEW,
-    TerritoryLevel.STATE: GeometryLOD.OVERVIEW,
+    TerritoryLevel.STATE: GeometryLOD.DETAIL,
     TerritoryLevel.MUNICIPALITY: GeometryLOD.DETAIL,
 }
 
@@ -165,6 +165,26 @@ async def get_map(
         bbox=_scope_bbox(projection.features),
         features=features,
     )
+
+    parent_feature: MapFeature | None = None
+    if parent_code:
+        parent_row = await map_repo.fetch_single_feature(
+            session, parent_code, GeometryLOD.DETAIL
+        )
+        if parent_row:
+            parent_feature = MapFeature(
+                id=f"{parent_row.ibge_code}:detail",
+                properties=MapFeatureProperties(
+                    ibge_code=parent_row.ibge_code,
+                    name=parent_row.name,
+                    level=TerritoryLevel(parent_row.level),
+                    abbreviation=parent_row.abbreviation,
+                    parent_code=parent_row.parent_ibge_code,
+                    parent_name=parent_row.parent_name,
+                ),
+                geometry=orjson.loads(parent_row.geometry_json),
+            )
+    response.parent_feature = parent_feature
 
     logger.info(
         "map.projection",

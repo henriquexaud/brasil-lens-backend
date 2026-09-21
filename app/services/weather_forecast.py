@@ -1,7 +1,9 @@
 """Clima sob demanda, com cache limitado, deduplicação e fallback de até duas horas."""
 
 import asyncio
+import time
 from datetime import UTC, datetime, timedelta
+from math import ceil
 from weakref import WeakValueDictionary
 
 import httpx
@@ -9,12 +11,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import redis_cache
 from app.core.cache import TTLCache
-from app.core.errors import InvalidParameterError, ProviderError, TerritoryNotFoundError
+from app.core.errors import (
+    InvalidParameterError,
+    ProviderError,
+    ProviderRateLimitedError,
+    TerritoryNotFoundError,
+)
 from app.core.logging import get_logger
 from app.models import TerritoryLevel
 from app.providers.open_meteo import CAPITALS, fetch_locations
 from app.repositories import territories
-from app.schemas.weather import WeatherCurrentResponse, WeatherSourceStatusValue
+from app.schemas.weather import (
+    WeatherCity,
+    WeatherCurrentResponse,
+    WeatherSourceStatusValue,
+    build_weather_summary,
+)
 
 CACHE_SECONDS = 600
 MAX_DATA_AGE = timedelta(hours=2)
@@ -24,7 +36,32 @@ _fallback: TTLCache[WeatherCurrentResponse] = TTLCache(7200, 128)
 _failures: TTLCache[bool] = TTLCache(60, 128)
 _request_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 _revalidating: set[str] = set()
+# Cota da fonte esgotada (HTTP 429): enquanto vale, nenhuma consulta sai. É
+# global, e não por chave como `_failures`, porque a cota é da aplicação (IP):
+# com um cooldown por chave, cada lote distinto tentaria a fonte de novo.
+_rate_limited_until = 0.0
+_rate_limit_error: ProviderRateLimitedError | None = None
 logger = get_logger(__name__)
+
+
+def _rate_limit_cooldown() -> ProviderRateLimitedError | None:
+    remaining = _rate_limited_until - time.monotonic()
+    if remaining <= 0 or _rate_limit_error is None:
+        return None
+    return ProviderRateLimitedError(_rate_limit_error.message, ceil(remaining))
+
+
+def _start_rate_limit_cooldown(error: ProviderRateLimitedError) -> None:
+    global _rate_limited_until, _rate_limit_error
+    already_limited = time.monotonic() < _rate_limited_until
+    _rate_limited_until = time.monotonic() + error.retry_after_seconds
+    _rate_limit_error = error
+    if not already_limited:
+        logger.warning(
+            "weather.open_meteo_rate_limited: %s (nova tentativa em %ss)",
+            error.message,
+            error.retry_after_seconds,
+        )
 
 
 def _usable(result: WeatherCurrentResponse | None) -> bool:
@@ -43,7 +80,7 @@ async def _background_revalidate(
     locations: tuple[tuple[str, str, float, float], ...],
     include_forecast: bool,
 ) -> None:
-    if key in _revalidating:
+    if key in _revalidating or _rate_limit_cooldown() is not None:
         return
     _revalidating.add(key)
     try:
@@ -57,6 +94,8 @@ async def _background_revalidate(
             _fallback.set(key, result)
             await redis_cache.write("weather", key, result, REDIS_TTL_SECONDS)
             await redis_cache.write("weather-fallback", key, result, REDIS_TTL_SECONDS)
+    except ProviderRateLimitedError as exc:
+        _start_rate_limit_cooldown(exc)
     except Exception:
         logger.warning("weather.revalidation_failed: %s", key, exc_info=True)
     finally:
@@ -89,12 +128,20 @@ async def get_current(
             asyncio.create_task(_background_revalidate(key, locations, include_forecast))
             return shared.model_copy(update={"status": WeatherSourceStatusValue.STALE})
         try:
+            if (limited := _rate_limit_cooldown()) is not None:
+                raise limited
             if _failures.get(key):
                 raise ProviderError("Clima temporariamente indisponível. Tente em um minuto.")
-            async with httpx.AsyncClient(
-                base_url="https://api.open-meteo.com", timeout=20.0
-            ) as client:
-                cities = await fetch_locations(client, locations, include_forecast=include_forecast)
+            try:
+                async with httpx.AsyncClient(
+                    base_url="https://api.open-meteo.com", timeout=20.0
+                ) as client:
+                    cities = await fetch_locations(
+                        client, locations, include_forecast=include_forecast
+                    )
+            except ProviderRateLimitedError as exc:
+                _start_rate_limit_cooldown(exc)
+                raise
             result = WeatherCurrentResponse(fetched_at=datetime.now(UTC), cities=cities)
             if not _usable(result):
                 raise ProviderError("A fonte de clima não retornou condições recentes.")
@@ -103,9 +150,10 @@ async def get_current(
             await redis_cache.write("weather", key, result, REDIS_TTL_SECONDS)
             await redis_cache.write("weather-fallback", key, result, REDIS_TTL_SECONDS)
             return result
-        except ProviderError:
-            # Não prolonga o cooldown em cada consulta de um cliente.
-            if not _failures.get(key):
+        except ProviderError as exc:
+            # Não prolonga o cooldown em cada consulta de um cliente. Cota
+            # esgotada já tem cooldown global (e log próprio), sem traceback.
+            if not isinstance(exc, ProviderRateLimitedError) and not _failures.get(key):
                 _failures.set(key, True)
                 logger.warning("weather.open_meteo_unavailable", exc_info=True)
             previous = _fallback.get(key) or await redis_cache.read(
@@ -132,7 +180,10 @@ async def get_capitals_current(offset: int, limit: int) -> WeatherCurrentRespons
             await redis_cache.write("weather", key, entry, REDIS_TTL_SECONDS)
         _fallback.set(key, entry)
     return result.model_copy(
-        update={"next_offset": offset + limit if offset + limit < len(ordered) else None}
+        update={
+            "summary": build_weather_summary(result.cities),
+            "next_offset": offset + limit if offset + limit < len(ordered) else None,
+        }
     )
 
 
@@ -164,7 +215,13 @@ async def get_territory_current(
     result = await get_current(
         code, ((state, territory.name, *point),), include_forecast=include_forecast
     )
-    return result.model_copy(update={"cities": [result.cities[0].model_copy(update={"id": code})]})
+    cities = [result.cities[0].model_copy(update={"id": code})]
+    return result.model_copy(
+        update={
+            "cities": cities,
+            "summary": build_weather_summary(cities),
+        }
+    )
 
 
 async def get_municipalities_current(
@@ -200,7 +257,11 @@ async def get_municipalities_current(
             await redis_cache.write("weather", cache_key, entry, REDIS_TTL_SECONDS)
         _fallback.set(cache_key, entry)
     return result.model_copy(
-        update={"cities": cities, "next_offset": offset + limit if more else None}
+        update={
+            "cities": cities,
+            "summary": build_weather_summary(cities),
+            "next_offset": offset + limit if more else None,
+        }
     )
 
 
@@ -257,3 +318,63 @@ async def get_viewport_current(
         cities=cities,
         next_offset=offset + limit if more else None,
     )
+
+
+async def get_state_weather(
+    session: AsyncSession,
+    parent: str,
+) -> WeatherCurrentResponse:
+    state = await territories.get_by_code(session, parent)
+    if state is None:
+        raise TerritoryNotFoundError(parent)
+    if state.level != TerritoryLevel.STATE:
+        raise InvalidParameterError("O recorte precisa ser um estado.", parameter="parent")
+
+    cache_key = f"state-weather:{parent}"
+    cached = _cache.get(cache_key)
+    if cached and _usable(cached):
+        return cached
+    shared = await redis_cache.read("weather", cache_key, WeatherCurrentResponse)
+    if shared and _usable(shared):
+        _cache.set(cache_key, shared, ttl_seconds=60)
+        return shared
+
+    # Amostragem real com pontos mais dispersos espacialmente (até 20)
+    sample_points = await territories.list_weather_points(session, parent, 0, 20)
+    if not sample_points:
+        return WeatherCurrentResponse(fetched_at=datetime.now(UTC), cities=[])
+
+    locations = tuple((state.abbreviation or "", name, lat, lon) for _, name, lat, lon in sample_points)
+    raw_result = await get_current(f"state-sample:{parent}", locations, include_forecast=False)
+    measured_cities = [
+        city.model_copy(update={"id": point[0], "is_inferred": False})
+        for city, point in zip(raw_result.cities, sample_points)
+    ]
+    measured_map = {c.id: c for c in measured_cities}
+
+    # Todos os municípios do estado
+    all_points = await territories.list_weather_points(session, parent, 0, 10000)
+    from app.services.spatial_interpolation import interpolate_municipal_weather
+
+    state_abbr = state.abbreviation or ""
+    all_cities: list[WeatherCity] = []
+    for code, name, lat, lon in all_points:
+        if code in measured_map:
+            all_cities.append(measured_map[code])
+        else:
+            all_cities.append(
+                interpolate_municipal_weather(
+                    code, name, lat, lon, measured_cities, state_abbr
+                )
+            )
+
+    response = WeatherCurrentResponse(
+        fetched_at=datetime.now(UTC),
+        status=raw_result.status,
+        cities=all_cities,
+        summary=build_weather_summary(all_cities),
+        next_offset=None,
+    )
+    _cache.set(cache_key, response)
+    await redis_cache.write("weather", cache_key, response, REDIS_TTL_SECONDS)
+    return response

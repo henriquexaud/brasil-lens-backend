@@ -82,10 +82,10 @@ class Settings(BaseSettings):
     fire_hotspots_cache_ttl_seconds: int = 600
 
     # Tolerâncias de ST_SimplifyPreserveTopology, em graus (SRID 4326).
-    # 0.02° ~ 2 km: suficiente para o Brasil inteiro em zoom 4.
-    geometry_overview_tolerance: float = 0.02
-    # 0.002° ~ 200 m: suficiente para municípios em zoom de estado.
-    geometry_detail_tolerance: float = 0.002
+    # 0.005° ~ 500 m: mantém fidelidade e sinuosidade de fronteiras estaduais.
+    geometry_overview_tolerance: float = 0.005
+    # 0.001° ~ 100 m: preserva contornos em alta resolução e fidelidade cartográfica.
+    geometry_detail_tolerance: float = 0.001
 
     api_v1_prefix: str = Field(default="/api/v1")
 

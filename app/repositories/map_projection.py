@@ -157,3 +157,52 @@ async def fetch_map_projection(
         )
 
     return MapProjection(features=features, resolved_year=resolved_year)
+
+
+_SINGLE_FEATURE_SQL = text(
+    """
+    SELECT t.ibge_code,
+           t.name,
+           t.level::text AS level,
+           t.abbreviation,
+           p.ibge_code AS parent_ibge_code,
+           p.name AS parent_name,
+           t.bbox_west,
+           t.bbox_south,
+           t.bbox_east,
+           t.bbox_north,
+           ST_AsGeoJSON(g.geom) AS geometry_json
+      FROM territories t
+      LEFT JOIN territories p ON p.id = t.parent_id
+      JOIN territory_geometries g
+        ON g.territory_id = t.id
+       AND g.lod = CAST(:lod AS geometry_lod)
+     WHERE t.ibge_code = :code
+     LIMIT 1
+    """
+)
+
+
+async def fetch_single_feature(
+    session: AsyncSession,
+    ibge_code: str,
+    lod: GeometryLOD = GeometryLOD.DETAIL,
+) -> MapFeatureRow | None:
+    """Busca a geometria e atributos de um único território no LOD especificado."""
+    result = (
+        await session.execute(_SINGLE_FEATURE_SQL, {"code": ibge_code, "lod": lod.value})
+    ).first()
+    if not result:
+        return None
+    return MapFeatureRow(
+        ibge_code=result.ibge_code,
+        name=result.name,
+        level=result.level,
+        abbreviation=result.abbreviation,
+        parent_ibge_code=result.parent_ibge_code,
+        parent_name=result.parent_name,
+        value=None,
+        geometry_json=result.geometry_json,
+        bbox=(result.bbox_west, result.bbox_south, result.bbox_east, result.bbox_north),
+    )
+

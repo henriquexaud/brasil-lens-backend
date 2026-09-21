@@ -99,15 +99,22 @@ def aggregate(
                 latest_detection_at=latest.get(code),
             )
         )
+    muni_list = [item for item in municipalities if len(item.ibge_code) == 7]
+    ranked = sorted(
+        [item for item in muni_list if item.density is not None and item.count > 0],
+        key=lambda item: item.density if item.density is not None else 0.0,
+        reverse=True,
+    )[:5]
     return FireSummary(
         window_start=end - timedelta(hours=hours),
         window_end=end,
         hours=hours,
         total=len(rows),
-        municipalities=[item for item in municipalities if len(item.ibge_code) == 7],
+        municipalities=muni_list,
         states=[item for item in municipalities if len(item.ibge_code) == 2],
+        ranked_municipalities=ranked,
         unassigned_count=len(rows)
-        - sum(item.count for item in municipalities if len(item.ibge_code) == 7),
+        - sum(item.count for item in muni_list),
     )
 
 

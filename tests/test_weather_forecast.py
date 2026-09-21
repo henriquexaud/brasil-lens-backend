@@ -1,6 +1,7 @@
 """Contrato público, fusos, ausência de dados e comportamento durante falhas externas."""
 
 import asyncio
+from collections.abc import Iterator
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
@@ -8,7 +9,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
-from app.core.errors import ProviderError
+from app.core.errors import ProviderError, ProviderRateLimitedError
 from app.providers import open_meteo
 from app.schemas.weather import WeatherCity, WeatherCurrentResponse
 from app.services import weather_forecast as service
@@ -41,12 +42,22 @@ def city() -> WeatherCity:
     return open_meteo._parse_city(payload(), open_meteo.CAPITALS[0])
 
 
-@pytest.fixture(autouse=True)
-def clean_cache() -> None:
+def _reset_service_state() -> None:
     service._cache.clear()
     service._fallback.clear()
     service._failures.clear()
     service._request_locks.clear()
+    service._rate_limited_until = 0.0
+    service._rate_limit_error = None
+
+
+@pytest.fixture(autouse=True)
+def clean_cache() -> Iterator[None]:
+    _reset_service_state()
+    yield
+    # O cooldown é global do processo: sem limpar ao sair, vazaria para os
+    # testes de outros arquivos que chamam `get_current`.
+    _reset_service_state()
 
 
 async def test_batch_preserves_locations_units_nulls_zero_and_local_dates() -> None:
@@ -138,6 +149,118 @@ async def test_outage_without_cache_does_not_return_empty_success(
         with pytest.raises(ProviderError):
             await service.get_current()
     assert fetch.await_count == 1
+
+
+@pytest.mark.parametrize(
+    ("reason", "wait", "snippet"),
+    [
+        ("Minutely API request limit exceeded. Please try again in one minute.", 60, "pouco tempo"),
+        ("Hourly API request limit exceeded. Please try again in the next hour.", 300, "por hora"),
+        ("Daily API request limit exceeded. Please try again tomorrow.", 900, "diário"),
+        ("Something new", 300, "excesso de requisições"),
+    ],
+)
+async def test_provider_429_becomes_rate_limited_error(
+    reason: str, wait: int, snippet: str
+) -> None:
+    body = {"error": True, "reason": reason}
+    async with httpx.AsyncClient(
+        base_url="https://test",
+        transport=httpx.MockTransport(lambda _: httpx.Response(429, json=body)),
+    ) as client:
+        with pytest.raises(ProviderRateLimitedError) as caught:
+            await open_meteo.fetch_locations(client)
+    assert caught.value.retry_after_seconds == wait
+    assert snippet in caught.value.message
+
+
+async def test_provider_429_honors_retry_after_header() -> None:
+    async with httpx.AsyncClient(
+        base_url="https://test",
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(429, text="não é json", headers={"Retry-After": "42"})
+        ),
+    ) as client:
+        with pytest.raises(ProviderRateLimitedError) as caught:
+            await open_meteo.fetch_locations(client)
+    assert caught.value.retry_after_seconds == 42
+
+
+async def test_rate_limit_stops_all_outbound_calls_and_serves_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fetch = AsyncMock(side_effect=ProviderRateLimitedError("Limite diário atingido.", 900))
+    monkeypatch.setattr(service, "fetch_locations", fetch)
+    previous = WeatherCurrentResponse(fetched_at=datetime.now(UTC), cities=[city()])
+    service._fallback.set("capitals", previous)
+
+    result = await service.get_current()
+    assert result.status == "stale"
+    assert fetch.await_count == 1
+
+    # Outra chave, sem fallback: falha com a causa real e sem tocar a fonte —
+    # `_failures` é por chave, mas a cota é da aplicação inteira.
+    for key in ("municipalities:35:0:16", "municipalities:35:16:16", "viewport:a:b"):
+        with pytest.raises(ProviderRateLimitedError) as caught:
+            await service.get_current(key, (("SP", "Santos", -23.96, -46.33),))
+        assert 0 < caught.value.retry_after_seconds <= 900
+        assert caught.value.message == "Limite diário atingido."
+    assert fetch.await_count == 1
+
+
+async def test_rate_limit_cooldown_expires_and_service_recovers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fetch = AsyncMock(side_effect=ProviderRateLimitedError("Limite diário atingido.", 900))
+    monkeypatch.setattr(service, "fetch_locations", fetch)
+    with pytest.raises(ProviderRateLimitedError):
+        await service.get_current()
+
+    service._rate_limited_until = 0.0  # a espera terminou
+    fetch.side_effect = None
+    fetch.return_value = [city()]
+    result = await service.get_current()
+    assert result.status == "ok"
+    assert fetch.await_count == 2
+
+
+async def test_rate_limit_hitting_the_cooldown_does_not_extend_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        service, "fetch_locations", AsyncMock(side_effect=ProviderRateLimitedError("x", 900))
+    )
+    with pytest.raises(ProviderRateLimitedError):
+        await service.get_current()
+    until = service._rate_limited_until
+    with pytest.raises(ProviderRateLimitedError):
+        await service.get_current("outra", (("SP", "Santos", -23.96, -46.33),))
+    assert service._rate_limited_until == until
+
+
+async def test_rate_limited_endpoint_explains_the_cause_to_the_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.api.v1 import weather
+    from app.main import app
+
+    monkeypatch.setattr(
+        weather,
+        "get_current",
+        AsyncMock(side_effect=ProviderRateLimitedError("Limite diário atingido.", 900)),
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.get("/api/v1/weather/current")
+    assert response.status_code == 503
+    assert response.json() == {
+        "error": {
+            "code": "provider_rate_limited",
+            "message": "Limite diário atingido.",
+            "details": {"retryAfterSeconds": 900},
+        }
+    }
 
 
 async def test_expired_measurements_are_never_presented_as_current(

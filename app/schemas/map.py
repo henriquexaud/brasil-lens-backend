@@ -31,6 +31,7 @@ class MapLod(str, enum.Enum):
 
     OVERVIEW = "overview"
     DETAIL = "detail"
+    CANONICAL = "canonical"
 
     def to_geometry_lod(self) -> GeometryLOD:
         return GeometryLOD(self.value)
@@ -103,6 +104,7 @@ class MapFeatureCollection(CamelModel):
     classification: MapClassification | None = None
     bbox: tuple[float, float, float, float] | None = None
     features: list[MapFeature]
+    parent_feature: MapFeature | None = None
     next_offset: int | None = None
 
     @model_serializer(mode="wrap")

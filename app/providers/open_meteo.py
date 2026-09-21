@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-from app.core.errors import ProviderError
+from app.core.errors import ProviderError, ProviderRateLimitedError
 from app.models import DataContext
 from app.providers.descriptor import ProviderDescriptor
 from app.schemas.weather import WeatherCity, WeatherForecastDay
@@ -54,6 +54,49 @@ CAPITALS = (
     ("TO", "Palmas", -10.1840, -48.3336),
 )
 
+# Cota do plano gratuito (600/min, 5.000/h, 10.000/dia por IP). A fonte responde
+# 429 com `{"reason": "Daily API request limit exceeded..."}` e não documenta
+# quando cada janela renova — por isso a espera é um intervalo de sondagem (a
+# próxima consulta real é a sonda), não um horário calculado.
+_RATE_LIMIT_WINDOWS = (
+    (
+        "minutely",
+        60,
+        "Muitas consultas em pouco tempo à fonte de clima (Open-Meteo). "
+        "Tente novamente em instantes.",
+    ),
+    (
+        "hourly",
+        300,
+        "O limite por hora de consultas da fonte de clima (Open-Meteo) foi atingido. "
+        "Tente novamente em alguns minutos.",
+    ),
+    (
+        "daily",
+        900,
+        "O limite diário de consultas da fonte de clima (Open-Meteo) foi atingido. "
+        "Os dados voltam quando a cota for renovada.",
+    ),
+)
+_RATE_LIMIT_UNKNOWN = (
+    300,
+    "A fonte de clima (Open-Meteo) recusou a consulta por excesso de requisições. "
+    "Tente novamente em alguns minutos.",
+)
+
+
+def _rate_limit_error(response: httpx.Response) -> ProviderRateLimitedError:
+    try:
+        reason = str(response.json().get("reason", "")).lower()
+    except (ValueError, AttributeError):
+        reason = ""
+    wait, message = next(
+        ((wait, text) for window, wait, text in _RATE_LIMIT_WINDOWS if window in reason),
+        _RATE_LIMIT_UNKNOWN,
+    )
+    retry_after = response.headers.get("retry-after", "")
+    return ProviderRateLimitedError(message, int(retry_after) if retry_after.isdigit() else wait)
+
 
 async def fetch_locations(
     client: httpx.AsyncClient,
@@ -85,6 +128,8 @@ async def fetch_locations(
                 "precipitation_unit": "mm",
             },
         )
+        if response.status_code == 429:
+            raise _rate_limit_error(response)
         response.raise_for_status()
         payload = response.json()
         if isinstance(payload, dict) and len(locations) == 1:

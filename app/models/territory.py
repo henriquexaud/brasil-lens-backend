@@ -135,6 +135,10 @@ class Territory(Base, TimestampMixin):
         cascade="all, delete-orphan",
     )
 
+    # Campos normalizados (minúsculo e sem diacríticos) para busca instantânea indexada
+    normalized_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    normalized_abbreviation: Mapped[str | None] = mapped_column(String(4), nullable=True)
+
     __table_args__ = (
         CheckConstraint(
             "(level = 'country' AND parent_id IS NULL) "
@@ -145,6 +149,9 @@ class Territory(Base, TimestampMixin):
         Index("ix_territories_level_name", "level", "name"),
         # Filhos de um território (drill-down, contagem de municípios).
         Index("ix_territories_parent_id_name", "parent_id", "name"),
+        # Busca textual normalizada e insensível a acentos
+        Index("ix_territories_normalized_name", "normalized_name"),
+        Index("ix_territories_normalized_abbr", "normalized_abbreviation"),
     )
 
     def __repr__(self) -> str:  # pragma: no cover - diagnóstico

@@ -47,6 +47,7 @@ def test_density_compares_area_not_absolute_counts_and_preserves_zero_and_missin
     assert empty.latest_detection_at is None
     assert result.total == 120
     assert result.unassigned_count == 0
+    assert [m.ibge_code for m in result.ranked_municipalities] == ["1100002", "1100001"]
 
 
 def test_unknown_municipality_preserves_total_without_fake_density():

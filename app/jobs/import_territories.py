@@ -15,11 +15,18 @@ FK real: o pai precisa existir antes do filho.
 
 from __future__ import annotations
 
+import unicodedata
 from datetime import UTC, datetime
 
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
+
+
+def normalize_text(text: str) -> str:
+    return "".join(
+        c for c in unicodedata.normalize("NFD", text) if unicodedata.category(c) != "Mn"
+    ).lower().strip()
 
 from app.core.logging import get_logger
 from app.db.results import affected_rows
@@ -75,6 +82,10 @@ async def _upsert_level(
                 "level": record.level,
                 "abbreviation": record.abbreviation,
                 "parent_id": parent_id,
+                "normalized_name": normalize_text(record.name),
+                "normalized_abbreviation": (
+                    normalize_text(record.abbreviation) if record.abbreviation else None
+                ),
             }
         )
 
@@ -89,6 +100,8 @@ async def _upsert_level(
             "level": statement.excluded.level,
             "abbreviation": statement.excluded.abbreviation,
             "parent_id": statement.excluded.parent_id,
+            "normalized_name": statement.excluded.normalized_name,
+            "normalized_abbreviation": statement.excluded.normalized_abbreviation,
             "updated_at": datetime.now(UTC),
         },
     )
