@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import redis_cache
 from app.core.cache import TTLCache
 from app.core.config import settings
+from app.core.cooldown import SourceCooldown
 from app.core.errors import InvalidParameterError, ProviderError, TerritoryNotFoundError
 from app.core.logging import get_logger
 from app.repositories import territories
@@ -35,6 +36,8 @@ _cache: TTLCache[FireHotspotCollection] = TTLCache(settings.fire_hotspots_cache_
 _fallback: TTLCache[FireHotspotCollection] = TTLCache(3600, 64)
 _failures: TTLCache[bool] = TTLCache(60, 64)
 _locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
+# Pausa comum a metadados, resumo e identificação: todas consultam o mesmo WFS.
+inpe_cooldown = SourceCooldown("inpe", 60)
 _FIELDS = (
     "id_foco_bdq,data_hora_gmt,satelite,municipio,estado,id_1,id_2,bioma,"
     "precipitacao,numero_dias_sem_chuva,risco_fogo,frp,geometria"
@@ -110,6 +113,11 @@ def _parse_feature(raw: dict[str, Any]) -> FireHotspotFeature:
 
 
 async def _fetch_wfs(cql_filter: str, count: int) -> tuple[list[FireHotspotFeature], int]:
+    if inpe_cooldown.active:
+        raise ProviderError(
+            "O INPE não está respondendo. Nova tentativa automática em "
+            f"{inpe_cooldown.remaining_seconds()} s."
+        )
     try:
         async with httpx.AsyncClient(timeout=settings.inpe_queimadas_http_timeout) as client:
             response = await client.get(
@@ -137,6 +145,7 @@ async def _fetch_wfs(cql_filter: str, count: int) -> tuple[list[FireHotspotFeatu
             raise ValueError("Contagem de focos inconsistente")
         return features, total
     except (httpx.HTTPError, ValueError, TypeError, KeyError, AttributeError) as exc:
+        inpe_cooldown.trip()
         raise ProviderError("Não foi possível consultar os focos de calor no INPE.") from exc
 
 

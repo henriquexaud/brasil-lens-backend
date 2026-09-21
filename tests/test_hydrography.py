@@ -2,6 +2,7 @@
 
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 
 from app.schemas.hydrography import HydroFeatureCollection
@@ -151,3 +152,22 @@ def test_zoom_filters_reduce_tributaries_and_small_lakes_at_country_scale():
     assert country[0] > state[0] > local[0]
     assert country[1] > state[1] > local[1]
     assert country[2] > state[2] > local[2]
+
+
+async def test_ana_outage_pauses_calls_and_serves_partial_snapshot(monkeypatch) -> None:
+    """Com a ANA fora do ar, outro recorte não espera um novo timeout: sai do snapshot."""
+    rivers = AsyncMock(side_effect=httpx.ConnectError("ANA fora do ar"))
+    bodies = AsyncMock(return_value=[])
+    monkeypatch.setattr(service, "_fetch_rivers", rivers)
+    monkeypatch.setattr(service, "_fetch_water_bodies", bodies)
+
+    first = await service.get_hydrography(
+        AsyncMock(), level="state", bbox=(-47.0, -24.0, -46.0, -23.0), zoom=8
+    )
+    second = await service.get_hydrography(
+        AsyncMock(), level="state", bbox=(-45.0, -23.0, -44.0, -22.0), zoom=8
+    )
+
+    assert first.metadata.status == second.metadata.status == "partial"
+    assert rivers.call_count == 1
+    assert bodies.call_count == 0

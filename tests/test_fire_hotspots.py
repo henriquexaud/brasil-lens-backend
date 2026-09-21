@@ -251,3 +251,22 @@ async def test_api_validation_and_error_contract(monkeypatch: pytest.MonkeyPatch
         response = await client.get("/api/v1/fire-hotspots")
         assert response.status_code == 502
         assert response.json()["error"]["code"] == "provider_error"
+
+
+@respx.mock
+async def test_inpe_outage_pauses_every_scope_and_says_when_it_retries() -> None:
+    upstream = respx.get(settings.inpe_queimadas_wfs_url).mock(return_value=httpx.Response(503))
+    with pytest.raises(ProviderError):
+        await service.get_fire_hotspots(AsyncMock())
+    with pytest.raises(ProviderError, match="Nova tentativa automática"):
+        await service.identify_fire_hotspots(
+            AsyncMock(),
+            level="country",
+            parent_code=None,
+            hours=24,
+            latitude=-2.46,
+            longitude=-49.2,
+            tolerance=0.01,
+            at=datetime.now(UTC),
+        )
+    assert upstream.call_count == 1

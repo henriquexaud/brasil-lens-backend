@@ -961,6 +961,11 @@ CEMADEN, sem endpoint público confirmado, foi removido.
 
 ### Focos INPE: cobertura completa e detalhe sob demanda
 
+Uma falha do INPE ou da ANA pausa a fonte inteira por 60 s (`app/core/cooldown.py`):
+nesse intervalo as rotas respondem na hora — erro para focos, snapshot local para
+hidrografia — em vez de cada recorte esperar um novo timeout. A Open-Meteo mantém
+a pausa própria por cota e a falha lembrada por recorte (`services/weather_forecast.py`).
+
 O BDQueimadas publica dezenas de milhares de detecções em uma janela de 48 horas.
 A camada reutiliza a pintura territorial: estados na visão Brasil e municípios
 ao entrar na UF, com a mesma densidade por área; WMS acrescenta detecções pontuais

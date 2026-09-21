@@ -21,6 +21,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.core import cooldown
 from app.core.config import settings
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -36,6 +37,12 @@ def isolate_shared_cache(monkeypatch: pytest.MonkeyPatch) -> None:
     # Fixtures de fontes externas não podem ler/gravar o cache da aplicação local.
     # Os testes de Redis injetam seu próprio cliente em memória.
     monkeypatch.setattr(settings, "redis_url", None)
+
+
+@pytest.fixture(autouse=True)
+def reset_source_cooldowns() -> None:
+    # Uma fonte "fora do ar" num teste não pode silenciar a fonte no seguinte.
+    cooldown.reset_all()
 
 
 @pytest.fixture(scope="session")

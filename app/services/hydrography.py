@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import redis_cache
 from app.core.cache import TTLCache
+from app.core.cooldown import SourceCooldown
 from app.core.logging import get_logger
 from app.repositories import territories as territories_repo
 from app.schemas.hydrography import (
@@ -41,6 +42,12 @@ BRAZIL_BBOX: tuple[float, float, float, float] = (-73.99, -33.75, -28.84, 5.27)
 CACHE_TTL_SECONDS = 86400  # 24 horas
 _cache: TTLCache[HydroFeatureCollection] = TTLCache(CACHE_TTL_SECONDS, max_entries=128)
 _locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
+# ANA fora do ar: sem a pausa, cada movimento do mapa esperava o timeout
+# inteiro de novo. Durante ela, a camada sai do snapshot local na hora.
+ana_cooldown = SourceCooldown("ana", 60)
+# Uma resposta parcial vale por pouco tempo: o bastante para não recalcular o
+# mesmo recorte, curto o bastante para a ANA voltar logo que se recuperar.
+PARTIAL_CACHE_SECONDS = 60
 
 _SNAPSHOT_PATH = Path(__file__).parent / "data" / "major_rivers.json"
 _MAJOR_RIVERS: list[HydroFeature] = []
@@ -379,34 +386,40 @@ async def get_hydrography(
         if cached is not None:
             _cache.set(key, cached, ttl_seconds=30)
             return cached
-        rivers, bodies = [], []
+        bodies: list[HydroFeature] = []
         partial = False
-        if include_rivers and zoom < 6:
-            rivers = [
-                river
-                for river in _MAJOR_RIVERS
-                if (river.properties.drainage_area_km2 or 0) >= drainage
-            ]
-        async with httpx.AsyncClient(
-            timeout=30, headers={"User-Agent": "BrasilLens/1.0"}
-        ) as client:
+        snapshot_rivers = [
+            river
+            for river in _MAJOR_RIVERS
+            if (river.properties.drainage_area_km2 or 0) >= drainage
+        ]
+        rivers = snapshot_rivers if include_rivers and zoom < 6 else []
+        needs_ana = (include_rivers and zoom >= 6) or include_water_bodies
+        if needs_ana and ana_cooldown.active:
+            partial = True
             if include_rivers and zoom >= 6:
-                try:
-                    rivers = await _fetch_rivers(client, zoom, effective_bbox)
-                except (httpx.HTTPError, ValueError, KeyError):
+                rivers = snapshot_rivers
+        elif needs_ana:
+            async with httpx.AsyncClient(
+                timeout=30, headers={"User-Agent": "BrasilLens/1.0"}
+            ) as client:
+                if include_rivers and zoom >= 6:
+                    try:
+                        rivers = await _fetch_rivers(client, zoom, effective_bbox)
+                    except (httpx.HTTPError, ValueError, KeyError):
+                        partial = True
+                        rivers = snapshot_rivers
+                        ana_cooldown.trip()
+                        logger.warning("ANA rios indisponível; usando eixos do snapshot")
+                if include_water_bodies and not ana_cooldown.active:
+                    try:
+                        bodies = await _fetch_water_bodies(client, zoom, effective_bbox)
+                    except (httpx.HTTPError, ValueError, KeyError):
+                        partial = True
+                        ana_cooldown.trip()
+                        logger.warning("ANA massas de água indisponível")
+                elif include_water_bodies:
                     partial = True
-                    rivers = [
-                        river
-                        for river in _MAJOR_RIVERS
-                        if (river.properties.drainage_area_km2 or 0) >= drainage
-                    ]
-                    logger.warning("ANA rios indisponível; usando eixos do snapshot")
-            if include_water_bodies:
-                try:
-                    bodies = await _fetch_water_bodies(client, zoom, effective_bbox)
-                except (httpx.HTTPError, ValueError, KeyError):
-                    partial = True
-                    logger.warning("ANA massas de água indisponível")
         visible = [
             part for river in rivers if (part := _visible_river(river, effective_bbox, tolerance))
         ]
@@ -422,7 +435,9 @@ async def get_hydrography(
             features=visible + bodies,
         )
         # Uma falha transitória não vira uma camada incompleta em cache por 24h.
-        if not partial:
+        if partial:
+            _cache.set(key, result, ttl_seconds=PARTIAL_CACHE_SECONDS)
+        else:
             _cache.set(key, result)
             await redis_cache.write("hydrography", key, result, CACHE_TTL_SECONDS)
         return result
