@@ -154,7 +154,7 @@ async def get_municipalities_current(
     )
     cities = [
         city.model_copy(update={"id": point[0]})
-        for city, point in zip(result.cities, points, strict=True)
+        for city, point in zip(result.cities, points)
     ]
     # A seleção reaproveita as condições já aquecidas pelo lote, sem nova chamada externa.
     for city in cities:
@@ -196,7 +196,7 @@ async def get_viewport_current(
         locations = tuple((uf, name, lat, lon) for _, name, uf, lat, lon in missing)
         key = "viewport:" + ":".join(item[0] for item in missing)
         result = await get_current(key, locations, include_forecast=False)
-        for point, city in zip(missing, result.cities, strict=True):
+        for point, city in zip(missing, result.cities):
             code = point[0]
             entry = result.model_copy(update={"cities": [city.model_copy(update={"id": code})]})
             known[code] = entry
@@ -204,12 +204,19 @@ async def get_viewport_current(
                 _cache.set(f"{code}:current", entry)
                 await redis_cache.write("weather", f"{code}:current", entry, CACHE_SECONDS)
             _fallback.set(f"{code}:current", entry)
-    values = list(known.values())
+    values = [v for v in known.values() if v.cities]
+    if not values:
+        return WeatherCurrentResponse(fetched_at=datetime.now(UTC), cities=[])
+    cities = [
+        known[point[0]].cities[0].model_copy(update={"id": point[0]})
+        for point in points
+        if point[0] in known and known[point[0]].cities
+    ]
     return WeatherCurrentResponse(
         fetched_at=min(item.fetched_at for item in values),
         status=WeatherSourceStatusValue.STALE
         if any(item.status == WeatherSourceStatusValue.STALE for item in values)
         else WeatherSourceStatusValue.OK,
-        cities=[known[point[0]].cities[0].model_copy(update={"id": point[0]}) for point in points],
+        cities=cities,
         next_offset=offset + limit if more else None,
     )

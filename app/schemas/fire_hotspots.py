@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 
 from app.schemas.common import CamelModel
 
@@ -74,7 +74,10 @@ class FireMunicipality(CamelModel):
     state: str
     area_km2: float | None
     count: int
-    count_24h: int
+    count_24h: int = Field(
+        validation_alias=AliasChoices("count_24h", "count24h", "count24H"),
+        serialization_alias="count24h",
+    )
     density: float | None
     latest_detection_at: datetime | None
 
