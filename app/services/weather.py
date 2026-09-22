@@ -60,31 +60,31 @@ def _category_for(provider: str) -> WeatherAlertCategory:
 
 
 def _severity_level_for(provider: str, severity: str) -> WeatherAlertSeverityLevel:
-    """Classificação comum de severidade — a mesma escala de 3 níveis que o
-    frontend já desenhava antes (`AlertSeverityTier`), calculada aqui uma vez
-    em vez de adivinhada em cada render a partir de texto/cor por fonte (ver
-    `alertStyles.ts`). O vocabulário de `severity` é por fonte — INMET fala em
-    "perigo", CEMADEN em "alto"/"moderado" — por isso `provider` entra na
-    decisão, não só o texto.
+    """Classificação comum de severidade em 4 níveis normalizados:
+    Moderado, Alto, Muito alto e Extremo.
+    Vocabulário por fonte mapeado para uma escala visual comum.
     """
     text = (severity or "").strip().lower()
     if provider == "cemaden":
-        if text == "muito alto":
+        if "muito alto" in text:
+            return WeatherAlertSeverityLevel.VERY_HIGH
+        if "extremo" in text:
             return WeatherAlertSeverityLevel.EXTREME
-        if text == "alto":
-            return WeatherAlertSeverityLevel.DANGER
-        if text == "moderado":
-            return WeatherAlertSeverityLevel.POTENTIAL
-        return WeatherAlertSeverityLevel.OTHER
-    # INMET: "potencial" checado antes de "perigo" — "Perigo Potencial" contém
-    # as duas palavras (mesma ordem de checagem que alertStyles.ts já usava).
-    if "grande perigo" in text:
+        if "alto" in text:
+            return WeatherAlertSeverityLevel.HIGH
+        if "moderado" in text:
+            return WeatherAlertSeverityLevel.MODERATE
+        return WeatherAlertSeverityLevel.MODERATE
+    # INMET: "grande perigo" -> EXTREME, "perigo" -> HIGH, "potencial" -> MODERATE
+    if "grande perigo" in text or "extremo" in text:
         return WeatherAlertSeverityLevel.EXTREME
-    if "potencial" in text:
-        return WeatherAlertSeverityLevel.POTENTIAL
-    if "perigo" in text:
-        return WeatherAlertSeverityLevel.DANGER
-    return WeatherAlertSeverityLevel.OTHER
+    if "muito alto" in text:
+        return WeatherAlertSeverityLevel.VERY_HIGH
+    if "potencial" in text or "moderado" in text:
+        return WeatherAlertSeverityLevel.MODERATE
+    if "perigo" in text or "alto" in text:
+        return WeatherAlertSeverityLevel.HIGH
+    return WeatherAlertSeverityLevel.MODERATE
 
 
 # Uma fonte sem execução bem-sucedida há mais que isto (múltiplo da cadência

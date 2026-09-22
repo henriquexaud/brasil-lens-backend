@@ -59,17 +59,18 @@ class WeatherAlertCategory(str, enum.Enum):
 
 
 class WeatherAlertSeverityLevel(str, enum.Enum):
-    """Tier visual comum — a mesma escala de 3 níveis que o frontend já usava
-    (`AlertSeverityTier` em `alertStyles.ts`), só que calculada aqui em vez de
-    adivinhada no cliente a partir de texto/cor por fonte. Ver
-    `services/weather.py::_severity_level_for`: cada provider tem seu próprio
-    vocabulário de `severity` (INMET: "Perigo"/"Grande Perigo"; CEMADEN:
-    "Alto"/"Muito Alto"), mas os dois caem nestes 4 valores.
+    """Tier visual comum em 4 níveis normalizados:
+    Moderado, Alto, Muito alto e Extremo.
+    Mantém aliases legados para compatibilidade.
     """
 
+    MODERATE = "moderate"
+    HIGH = "high"
+    VERY_HIGH = "very_high"
+    EXTREME = "extreme"
+    # Aliases legados
     POTENTIAL = "potential"
     DANGER = "danger"
-    EXTREME = "extreme"
     OTHER = "other"
 
 
