@@ -42,22 +42,52 @@ def city() -> WeatherCity:
     return open_meteo._parse_city(payload(), open_meteo.CAPITALS[0])
 
 
-def _reset_service_state() -> None:
-    service._cache.clear()
-    service._fallback.clear()
-    service._failures.clear()
-    service._request_locks.clear()
-    service._rate_limited_until = 0.0
-    service._rate_limit_error = None
-
-
 @pytest.fixture(autouse=True)
 def clean_cache() -> Iterator[None]:
-    _reset_service_state()
+    service.reset_state()
     yield
-    # O cooldown é global do processo: sem limpar ao sair, vazaria para os
-    # testes de outros arquivos que chamam `get_current`.
-    _reset_service_state()
+    # Pausas e leituras são do processo: sem limpar ao sair, vazariam para os
+    # testes de outros arquivos.
+    service.reset_state()
+
+
+def parsed(locations, *, include_forecast: bool = False, minutes_ago: float = 0):
+    raw = payload()
+    raw["current"]["time"] = (datetime.now(UTC) - timedelta(minutes=minutes_ago)).timestamp()
+    if not include_forecast:
+        del raw["daily"]
+    return [open_meteo._parse_city(raw, location) for location in locations]
+
+
+def fake_fetch() -> AsyncMock:
+    async def fetch(client, locations, *, include_forecast):
+        return parsed(locations, include_forecast=include_forecast)
+
+    return AsyncMock(side_effect=fetch)
+
+
+def requested(fetch: AsyncMock) -> list[str]:
+    return [location[1] for call in fetch.await_args_list for location in call.args[1]]
+
+
+def store(point, *, minutes_ago: float, variant="current") -> service.WeatherReading:
+    code, name, uf, lat, lon = point
+    city = parsed(((uf, name, lat, lon),), minutes_ago=minutes_ago)[0]
+    reading = service.WeatherReading(
+        fetched_at=datetime.now(UTC) - timedelta(minutes=minutes_ago),
+        city=city.model_copy(update={"id": code}),
+    )
+    service._readings.set(f"{variant}:{code}", reading)
+    return reading
+
+
+async def settle() -> None:
+    """Espera as renovações em segundo plano terminarem."""
+    await asyncio.gather(*list(service._inflight.values()), return_exceptions=True)
+
+
+SAO_PAULO = service._capital_point(next(c for c in open_meteo.CAPITALS if c[0] == "SP"))
+MANAUS = service._capital_point(next(c for c in open_meteo.CAPITALS if c[0] == "AM"))
 
 
 async def test_batch_preserves_locations_units_nulls_zero_and_local_dates() -> None:
@@ -114,43 +144,6 @@ async def test_missing_temperature_is_not_fabricated() -> None:
             await open_meteo.fetch_locations(client)
 
 
-async def test_concurrent_requests_share_one_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
-    fetch = AsyncMock(return_value=[city()])
-    monkeypatch.setattr(service, "fetch_locations", fetch)
-    results = await asyncio.gather(*(service.get_current() for _ in range(8)))
-    assert fetch.await_count == 1
-    assert all(result.status == "ok" for result in results)
-    assert isinstance(
-        results[0].model_dump(mode="json", by_alias=True)["cities"][0]["temperatureC"], float
-    )
-
-
-async def test_outage_returns_identified_fallback_and_limits_retries(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    fetch = AsyncMock(side_effect=ProviderError("Indisponível"))
-    monkeypatch.setattr(service, "fetch_locations", fetch)
-    previous = WeatherCurrentResponse(fetched_at=datetime.now(UTC), cities=[city()])
-    service._fallback.set("capitals", previous)
-    for _ in range(3):
-        result = await service.get_current()
-        assert result.status == "stale"
-        assert result.fetched_at == previous.fetched_at
-        assert result.cities[0].observed_at == previous.cities[0].observed_at
-    assert fetch.await_count == 1
-
-
-async def test_outage_without_cache_does_not_return_empty_success(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    fetch = AsyncMock(side_effect=ProviderError("Indisponível"))
-    monkeypatch.setattr(service, "fetch_locations", fetch)
-    for _ in range(2):
-        with pytest.raises(ProviderError):
-            await service.get_current()
-    assert fetch.await_count == 1
-
-
 @pytest.mark.parametrize(
     ("reason", "wait", "snippet"),
     [
@@ -186,58 +179,6 @@ async def test_provider_429_honors_retry_after_header() -> None:
     assert caught.value.retry_after_seconds == 42
 
 
-async def test_rate_limit_stops_all_outbound_calls_and_serves_fallback(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    fetch = AsyncMock(side_effect=ProviderRateLimitedError("Limite diário atingido.", 900))
-    monkeypatch.setattr(service, "fetch_locations", fetch)
-    previous = WeatherCurrentResponse(fetched_at=datetime.now(UTC), cities=[city()])
-    service._fallback.set("capitals", previous)
-
-    result = await service.get_current()
-    assert result.status == "stale"
-    assert fetch.await_count == 1
-
-    # Outra chave, sem fallback: falha com a causa real e sem tocar a fonte —
-    # `_failures` é por chave, mas a cota é da aplicação inteira.
-    for key in ("municipalities:35:0:16", "municipalities:35:16:16", "viewport:a:b"):
-        with pytest.raises(ProviderRateLimitedError) as caught:
-            await service.get_current(key, (("SP", "Santos", -23.96, -46.33),))
-        assert 0 < caught.value.retry_after_seconds <= 900
-        assert caught.value.message == "Limite diário atingido."
-    assert fetch.await_count == 1
-
-
-async def test_rate_limit_cooldown_expires_and_service_recovers(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    fetch = AsyncMock(side_effect=ProviderRateLimitedError("Limite diário atingido.", 900))
-    monkeypatch.setattr(service, "fetch_locations", fetch)
-    with pytest.raises(ProviderRateLimitedError):
-        await service.get_current()
-
-    service._rate_limited_until = 0.0  # a espera terminou
-    fetch.side_effect = None
-    fetch.return_value = [city()]
-    result = await service.get_current()
-    assert result.status == "ok"
-    assert fetch.await_count == 2
-
-
-async def test_rate_limit_hitting_the_cooldown_does_not_extend_it(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        service, "fetch_locations", AsyncMock(side_effect=ProviderRateLimitedError("x", 900))
-    )
-    with pytest.raises(ProviderRateLimitedError):
-        await service.get_current()
-    until = service._rate_limited_until
-    with pytest.raises(ProviderRateLimitedError):
-        await service.get_current("outra", (("SP", "Santos", -23.96, -46.33),))
-    assert service._rate_limited_until == until
-
-
 async def test_rate_limited_endpoint_explains_the_cause_to_the_client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -261,55 +202,6 @@ async def test_rate_limited_endpoint_explains_the_cause_to_the_client(
             "details": {"retryAfterSeconds": 900},
         }
     }
-
-
-async def test_expired_measurements_are_never_presented_as_current(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    old = city().model_copy(update={"observed_at": datetime.now(UTC) - timedelta(hours=3)})
-    service._fallback.set(
-        "capitals", WeatherCurrentResponse(fetched_at=datetime.now(UTC), cities=[old])
-    )
-    monkeypatch.setattr(service, "fetch_locations", AsyncMock(return_value=[old]))
-    with pytest.raises(ProviderError):
-        await service.get_current()
-
-
-@pytest.mark.db
-async def test_weather_state_uses_its_capital(session, monkeypatch: pytest.MonkeyPatch) -> None:
-    from app.models import TerritoryLevel
-    from app.repositories import territories
-
-    state = await territories.get_by_code(session, "35")
-    assert state and state.level == TerritoryLevel.STATE
-    capital = open_meteo._parse_city(payload(), ("SP", "São Paulo", -23.55, -46.63))
-    monkeypatch.setattr(
-        service,
-        "get_current",
-        AsyncMock(
-            return_value=WeatherCurrentResponse(fetched_at=datetime.now(UTC), cities=[capital])
-        ),
-    )
-    result = await service.get_territory_current(session, "35")
-    assert [entry.name for entry in result.cities] == ["São Paulo"]
-    assert service.get_current.call_args.args[0] == "capital:SP"
-    assert len(service.get_current.call_args.args[1]) == 1
-
-
-@pytest.mark.db
-async def test_weather_municipality_uses_local_geometry(
-    session, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from app.repositories import territories
-
-    point = await territories.get_weather_point(session, "3509502")
-    assert point is not None
-    assert -23.2 < point[0] < -22.5 and -47.4 < point[1] < -46.7
-    fetch = AsyncMock(return_value=[city()])
-    monkeypatch.setattr(service, "fetch_locations", fetch)
-    result = await service.get_territory_current(session, "3509502")
-    assert result.cities[0].id == "3509502"
-    assert fetch.await_args.args[1] == (("SP", "Campinas", *point),)
 
 
 async def test_current_endpoint_contract_and_invalid_territory(
@@ -346,8 +238,11 @@ async def test_current_only_does_not_request_daily_forecast() -> None:
     del raw["daily"]
 
     def respond(request: httpx.Request) -> httpx.Response:
-        assert "daily" not in request.url.params
+        # Sem previsão, só o total e a probabilidade de hoje — e a chuva horária de 24 h.
+        assert request.url.params["daily"] == "precipitation_probability_max,precipitation_sum"
         assert request.url.params["forecast_days"] == "1"
+        assert request.url.params["hourly"] == "precipitation"
+        assert request.url.params["past_hours"] == "24"
         return httpx.Response(200, json=raw)
 
     async with httpx.AsyncClient(
@@ -360,65 +255,6 @@ async def test_current_only_does_not_request_daily_forecast() -> None:
     assert result[0].forecast == []
 
 
-async def test_foreground_location_does_not_wait_for_background_batch(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    entered, release = asyncio.Event(), asyncio.Event()
-
-    async def fetch(client, locations, **kwargs):
-        if locations[0][1] == "Background":
-            entered.set()
-            await release.wait()
-        return [city()]
-
-    monkeypatch.setattr(service, "fetch_locations", fetch)
-    background = asyncio.create_task(
-        service.get_current("background", (("AC", "Background", -10, -67),), include_forecast=False)
-    )
-    try:
-        await asyncio.wait_for(entered.wait(), timeout=1)
-        selected = await asyncio.wait_for(service.get_current("selected"), timeout=1)
-        assert selected.status == "ok"
-        assert not background.done()
-    finally:
-        release.set()
-        await background
-
-
-@pytest.mark.db
-async def test_batches_are_paginated_and_seed_current_cache(
-    session, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from app.repositories import territories
-
-    expected = await territories.list_weather_points(session, "35", 0, 3)
-    assert len(expected) == 3
-
-    async def fetch(client, locations, *, include_forecast):
-        assert include_forecast is False
-        return [
-            open_meteo._parse_city(payload(), location).model_copy(update={"forecast": []})
-            for location in locations
-        ]
-
-    mocked = AsyncMock(side_effect=fetch)
-    monkeypatch.setattr(service, "fetch_locations", mocked)
-    first = await service.get_municipalities_current(session, "35", 0, 2)
-    second = await service.get_municipalities_current(session, "35", 2, 2)
-    assert first.next_offset == 2
-    assert second.next_offset == 4
-    assert first.cities[0].id == expected[0][0]
-    assert first.cities[1].id == expected[1][0]
-    assert second.cities[0].id == expected[2][0]
-    assert not set(c.id for c in first.cities) & set(c.id for c in second.cities)
-    selected = await service.get_territory_current(
-        session, first.cities[0].id, include_forecast=False
-    )
-    assert selected.cities[0].temperature_c == first.cities[0].temperature_c
-    assert mocked.await_count == 2
-    assert all(not entry.forecast for entry in first.cities)
-
-
 async def test_batch_endpoint_limits_and_required_scope() -> None:
     from app.main import app
 
@@ -429,18 +265,398 @@ async def test_batch_endpoint_limits_and_required_scope() -> None:
             assert (await client.get(f"/api/v1/weather/municipalities{query}")).status_code == 422
 
 
-async def test_capitals_load_in_small_batches_and_warm_selection(monkeypatch):
+# ------------------------------------------------ leituras por município --
+
+
+async def test_concurrent_requests_share_one_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
+    fetch = fake_fetch()
+    monkeypatch.setattr(service, "fetch_locations", fetch)
+    results = await asyncio.gather(*(service.get_current() for _ in range(8)))
+    assert fetch.await_count == 1
+    assert all(result.status == "ok" for result in results)
+    assert isinstance(
+        results[0].model_dump(mode="json", by_alias=True)["cities"][0]["temperatureC"], float
+    )
+
+
+async def test_overlapping_requests_fetch_each_municipality_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    release = asyncio.Event()
+
     async def fetch(client, locations, *, include_forecast):
-        assert include_forecast is False
-        return [open_meteo._parse_city(payload(), location) for location in locations]
+        await release.wait()
+        return parsed(locations)
 
     mocked = AsyncMock(side_effect=fetch)
     monkeypatch.setattr(service, "fetch_locations", mocked)
+    first = asyncio.create_task(service._resolve([SAO_PAULO, MANAUS], service.MAP_FRESHNESS))
+    await asyncio.sleep(0)
+    second = asyncio.create_task(service._resolve([MANAUS], service.MAP_FRESHNESS))
+    await asyncio.sleep(0)
+    release.set()
+    (a, _), (b, _) = await asyncio.gather(first, second)
+    assert requested(mocked) == ["São Paulo", "Manaus"]
+    assert a[MANAUS[0]] is b[MANAUS[0]]
+
+
+async def test_capital_reading_is_reused_by_every_route(monkeypatch: pytest.MonkeyPatch) -> None:
+    fetch = fake_fetch()
+    monkeypatch.setattr(service, "fetch_locations", fetch)
     pages = [await service.get_capitals_current(offset, 6) for offset in range(0, 27, 6)]
-    assert len(pages[0].cities) == 6
     assert {city.id for city in pages[0].cities} == {"SP", "AM", "BA", "DF", "RS", "PE"}
     assert [page.next_offset for page in pages] == [6, 12, 18, 24, None]
-    assert len({city.id for page in pages for city in page.cities}) == 27
-    selected = await service.get_current("capital:SP", (), include_forecast=False)
-    assert selected.cities[0].id == "SP"
-    assert mocked.await_count == 5, "selecionar uma UF já carregada não busca as 27 capitais"
+    assert fetch.await_count == 5
+    everything = await service.get_current(include_forecast=False)
+    assert len(everything.cities) == 27
+    assert fetch.await_count == 5, "as 27 capitais já foram lidas pelos lotes"
+    # A capital da UF é a mesma leitura do município (código IBGE).
+    assert service._readings.get(f"current:{SAO_PAULO[0]}") is not None
+
+
+async def test_fresh_reading_needs_no_fetch_and_expired_one_renews_in_background(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fetch = fake_fetch()
+    monkeypatch.setattr(service, "fetch_locations", fetch)
+    old = store(SAO_PAULO, minutes_ago=20)
+
+    # Camada do mapa: 30 minutos de validade.
+    page = await service.get_capitals_current(0, 1)
+    assert page.status == "ok" and page.fetched_at == old.fetched_at
+    assert fetch.await_count == 0
+
+    # Cidade selecionada: 15 minutos. A leitura vencida sai na hora e é renovada depois.
+    readings, outdated = await service._resolve([SAO_PAULO], service.SELECTED_FRESHNESS)
+    assert readings[SAO_PAULO[0]] is old and not outdated
+    await settle()
+    assert fetch.await_count == 1
+    assert service._readings.get(f"current:{SAO_PAULO[0]}").fetched_at > old.fetched_at
+
+
+async def test_a_new_fetch_waits_at_least_two_minutes(monkeypatch: pytest.MonkeyPatch) -> None:
+    fetch = fake_fetch()
+    monkeypatch.setattr(service, "fetch_locations", fetch)
+    reading = store(SAO_PAULO, minutes_ago=0)
+    # A fonte ainda devolve o intervalo anterior: consultar de novo agora não traria nada.
+    reading.city.observed_at = datetime.now(UTC) - timedelta(minutes=16)
+    await service._resolve([SAO_PAULO], service.SELECTED_FRESHNESS)
+    assert fetch.await_count == 0
+
+
+async def test_forecast_fetch_also_serves_current_conditions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fetch = fake_fetch()
+    monkeypatch.setattr(service, "fetch_locations", fetch)
+    forecast, _ = await service._resolve([SAO_PAULO], service.SELECTED_FRESHNESS, "forecast")
+    current, _ = await service._resolve([SAO_PAULO], service.SELECTED_FRESHNESS, "current")
+    assert forecast[SAO_PAULO[0]].city.forecast
+    assert current[SAO_PAULO[0]].city.forecast == []
+    assert fetch.await_count == 1
+
+
+async def test_foreground_point_does_not_wait_for_an_unrelated_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def fetch(client, locations, *, include_forecast):
+        if locations[0][1] == "Background":
+            entered.set()
+            await release.wait()
+        return parsed(locations)
+
+    monkeypatch.setattr(service, "fetch_locations", fetch)
+    background = asyncio.create_task(
+        service._resolve([("1200013", "Background", "AC", -10, -67)], service.MAP_FRESHNESS)
+    )
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        selected, _ = await asyncio.wait_for(
+            service._resolve([SAO_PAULO], service.SELECTED_FRESHNESS), timeout=1
+        )
+        assert SAO_PAULO[0] in selected
+        assert not background.done()
+    finally:
+        release.set()
+        await background
+
+
+async def test_client_that_gives_up_does_not_cancel_the_shared_fetch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    release = asyncio.Event()
+
+    async def fetch(client, locations, *, include_forecast):
+        await release.wait()
+        return parsed(locations)
+
+    monkeypatch.setattr(service, "fetch_locations", fetch)
+    request = asyncio.create_task(service._resolve([SAO_PAULO], service.MAP_FRESHNESS))
+    await asyncio.sleep(0)
+    request.cancel()
+    release.set()
+    await settle()
+    assert service._readings.get(f"current:{SAO_PAULO[0]}") is not None
+
+
+async def test_outage_serves_last_reading_as_previous_data_and_pauses_the_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fetch = AsyncMock(side_effect=ProviderError("Indisponível"))
+    monkeypatch.setattr(service, "fetch_locations", fetch)
+    previous = store(SAO_PAULO, minutes_ago=5 * 60)
+    for _ in range(3):
+        result = await service.get_capitals_current(0, 1)
+        assert result.status == "stale"
+        assert result.fetched_at == previous.fetched_at
+        assert result.cities[0].observed_at == previous.city.observed_at
+    assert fetch.await_count == 1
+
+
+async def test_outage_without_readings_raises_and_says_when_it_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fetch = AsyncMock(side_effect=ProviderError("Indisponível"))
+    monkeypatch.setattr(service, "fetch_locations", fetch)
+    with pytest.raises(ProviderError):
+        await service.get_capitals_current(0, 1)
+    with pytest.raises(ProviderError, match="Nova tentativa automática"):
+        await service.get_capitals_current(0, 1)
+    assert fetch.await_count == 1
+
+
+async def test_expired_reading_is_not_renewed_while_the_source_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fetch = AsyncMock(side_effect=ProviderError("Indisponível"))
+    monkeypatch.setattr(service, "fetch_locations", fetch)
+    service.open_meteo_cooldown.trip()
+    store(SAO_PAULO, minutes_ago=40)
+    result = await service.get_capitals_current(0, 1)
+    assert result.status == "stale", "leitura vencida com a fonte fora do ar é dado anterior"
+    assert fetch.await_count == 0
+
+
+async def test_rate_limit_stops_all_outbound_calls_and_serves_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fetch = AsyncMock(side_effect=ProviderRateLimitedError("Limite diário atingido.", 900))
+    monkeypatch.setattr(service, "fetch_locations", fetch)
+    store(SAO_PAULO, minutes_ago=3 * 60)
+
+    result = await service.get_capitals_current(0, 1)
+    assert result.status == "stale"
+    assert fetch.await_count == 1
+
+    # Outros municípios, sem leitura: falham com a causa real e sem tocar a fonte.
+    for point in (MANAUS, ("3548500", "Santos", "SP", -23.96, -46.33)):
+        with pytest.raises(ProviderRateLimitedError) as caught:
+            await service._resolve([point], service.MAP_FRESHNESS)
+        assert 0 < caught.value.retry_after_seconds <= 900
+        assert caught.value.message == "Limite diário atingido."
+    assert fetch.await_count == 1
+
+
+async def test_rate_limit_cooldown_expires_and_service_recovers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fetch = AsyncMock(side_effect=ProviderRateLimitedError("Limite diário atingido.", 900))
+    monkeypatch.setattr(service, "fetch_locations", fetch)
+    with pytest.raises(ProviderRateLimitedError):
+        await service.get_current()
+
+    service._rate_limited_until = 0.0  # a espera terminou
+    fetch.side_effect = fake_fetch().side_effect
+    result = await service.get_current()
+    assert result.status == "ok"
+    assert fetch.await_count == 2
+
+
+async def test_rate_limit_hitting_the_cooldown_does_not_extend_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        service, "fetch_locations", AsyncMock(side_effect=ProviderRateLimitedError("x", 900))
+    )
+    with pytest.raises(ProviderRateLimitedError):
+        await service.get_current()
+    until = service._rate_limited_until
+    with pytest.raises(ProviderRateLimitedError):
+        await service._resolve([MANAUS], service.MAP_FRESHNESS)
+    assert service._rate_limited_until == until
+
+
+async def test_readings_beyond_twelve_hours_are_never_presented(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store(SAO_PAULO, minutes_ago=13 * 60)
+
+    async def fetch(client, locations, *, include_forecast):
+        return parsed(locations, minutes_ago=3 * 60)
+
+    monkeypatch.setattr(service, "fetch_locations", fetch)
+    with pytest.raises(ProviderError, match="condições recentes"):
+        await service.get_capitals_current(0, 1)
+
+
+def test_cell_size_follows_zoom_and_visible_extent() -> None:
+    assert service._cell_size(8, (-50, -26, -43, -21.5)) == 0.5
+    assert service._cell_size(9, (-48.4, -24.7, -44.9, -22.4)) == 0.25
+    assert service._cell_size(10, (-47.5, -24.1, -45.8, -23)) == 0.0
+    # Tela enorme num zoom alto: continua amostrando.
+    assert service._cell_size(12, (-50, -26, -40, -20)) == 0.5
+    assert service._cell_size(8, (-60, -30, -40, -15)) == 1.0
+
+
+# ------------------------------------------------------- com o banco --
+
+
+@pytest.mark.db
+async def test_weather_state_uses_its_capital(session, monkeypatch: pytest.MonkeyPatch) -> None:
+    fetch = fake_fetch()
+    monkeypatch.setattr(service, "fetch_locations", fetch)
+    result = await service.get_territory_current(session, "35", include_forecast=False)
+    assert [(entry.id, entry.name) for entry in result.cities] == [("SP", "São Paulo")]
+    assert fetch.await_args.args[1] == (("SP", "São Paulo", SAO_PAULO[3], SAO_PAULO[4]),)
+    # A mesma leitura atende o município da capital.
+    city = await service.get_territory_current(session, "3550308", include_forecast=False)
+    assert city.cities[0].id == "3550308"
+    assert fetch.await_count == 1
+
+
+@pytest.mark.db
+async def test_weather_municipality_uses_local_geometry(
+    session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.repositories import territories
+
+    point = await territories.get_weather_point(session, "3509502")
+    assert point is not None
+    assert -23.2 < point[0] < -22.5 and -47.4 < point[1] < -46.7
+    fetch = fake_fetch()
+    monkeypatch.setattr(service, "fetch_locations", fetch)
+    result = await service.get_territory_current(session, "3509502")
+    assert result.cities[0].id == "3509502"
+    assert fetch.await_args.args[1] == (("SP", "Campinas", *point),)
+
+
+@pytest.mark.db
+async def test_batches_are_paginated_and_seed_the_selection(
+    session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.repositories import territories
+
+    expected = await territories.list_weather_points(session, "35", 0, 3)
+    fetch = fake_fetch()
+    monkeypatch.setattr(service, "fetch_locations", fetch)
+    first = await service.get_municipalities_current(session, "35", 0, 2)
+    second = await service.get_municipalities_current(session, "35", 2, 2)
+    assert first.next_offset == 2
+    assert second.next_offset == 4
+    assert [city.id for city in first.cities + second.cities[:1]] == [p[0] for p in expected]
+    selected = await service.get_territory_current(
+        session, first.cities[0].id, include_forecast=False
+    )
+    assert selected.cities[0].temperature_c == first.cities[0].temperature_c
+    assert fetch.await_count == 2
+    assert all(not entry.forecast for entry in first.cities)
+
+
+@pytest.mark.db
+async def test_state_sample_is_reused_by_the_close_view(
+    session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fetch = fake_fetch()
+    monkeypatch.setattr(service, "fetch_locations", fetch)
+    state = await service.get_state_weather(session, "35")
+    sample = {city.id for city in state.cities if not city.is_inferred}
+    assert len(sample) == service.STATE_SAMPLE_SIZE
+    assert len(state.cities) == 645
+    assert fetch.await_count == 1
+
+    # Zoom 8 perto da capital: uma leitura por célula de 0,5°, amostra reaproveitada.
+    bbox = (-50.1, -25.75, -43.1, -21.35)
+    close = await service.get_viewport_current(session, bbox, 8, parent="35")
+    fetched = requested(fetch)[service.STATE_SAMPLE_SIZE :]
+    measured = [city for city in close.cities if not city.is_inferred]
+    assert len(close.cities) > 300
+    assert len(fetched) < 80, "mede uma célula, não cada município"
+    assert not set(fetched) & {city.name for city in state.cities if city.id in sample}
+    assert sample & {city.id for city in measured}
+    assert all(city.id.startswith("35") for city in close.cities)
+
+    # Arrastar dentro das mesmas células não consulta de novo.
+    calls = fetch.await_count
+    await service.get_viewport_current(session, (-50.0, -25.7, -43.2, -21.4), 8, parent="35")
+    assert fetch.await_count == calls
+
+
+# ----------------------------------------------------------------- chuva --
+
+
+def test_rain_is_the_last_24_hours_and_live_rain_comes_from_the_latest_interval() -> None:
+    now = int(datetime.now(UTC).timestamp())
+    raw = payload()
+    raw["current"]["time"] = now
+    raw["current"]["precipitation"] = 0
+    raw["current"]["weather_code"] = 61
+    raw["hourly"] = {
+        "time": [now - 7200, now - 3600, now, now + 3600],
+        "precipitation": [1.2, None, 0.4, 9.0],  # a hora futura não entra
+    }
+    city = open_meteo._parse_city(raw, open_meteo.CAPITALS[0])
+    assert city.precipitation_24h_mm == 1.6
+    assert city.raining_now, "código de chuva, mesmo com o intervalo zerado"
+    raw["current"]["weather_code"] = 3
+    assert not open_meteo._parse_city(raw, open_meteo.CAPITALS[0]).raining_now
+    raw["current"]["precipitation"] = 0.2
+    assert open_meteo._parse_city(raw, open_meteo.CAPITALS[0]).raining_now
+
+
+async def test_brazil_rain_averages_dispersed_points_and_reuses_the_capital(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.repositories import territories
+
+    state = AsyncMock()
+    state.ibge_code, state.name, state.abbreviation = "35", "São Paulo", "SP"
+    monkeypatch.setattr(territories, "list_territories", AsyncMock(return_value=[state]))
+    points = [
+        (SAO_PAULO[0], "São Paulo", -23.5, -46.6),
+        ("3548500", "Santos", -23.9, -46.3),
+        ("3543402", "Ribeirão Preto", -21.2, -47.8),
+        ("3541406", "Presidente Prudente", -22.1, -51.4),
+    ]
+    monkeypatch.setattr(territories, "list_weather_points", AsyncMock(return_value=points))
+    rain = {"Santos": (12.0, True), "Ribeirão Preto": (4.0, False)}
+
+    async def fetch(client, locations, *, include_forecast):
+        cities = parsed(locations)
+        return [
+            city.model_copy(
+                update={
+                    "precipitation_24h_mm": rain.get(city.name, (0.0, False))[0],
+                    "raining_now": rain.get(city.name, (0.0, False))[1],
+                }
+            )
+            for city in cities
+        ]
+
+    mocked = AsyncMock(side_effect=fetch)
+    monkeypatch.setattr(service, "fetch_locations", mocked)
+    await service.get_capitals_current(0, 1)  # a capital já lida no mapa do Brasil
+    result = await service.get_states_rain(AsyncMock())
+    [sp] = result.cities
+    assert (sp.id, sp.name) == ("SP", "São Paulo")
+    assert sp.precipitation_24h_mm == 4.0
+    assert sp.raining_now and (sp.rain_points, sp.raining_points) == (4, 1)
+    assert requested(mocked)[1:] == ["Santos", "Ribeirão Preto", "Presidente Prudente"]
+    assert result.summary.max_rainfall == 4.0
+
+
+def test_rain_fields_keep_the_frontend_names() -> None:
+    body = city().model_copy(update={"precipitation_24h_mm": 3.2}).model_dump(by_alias=True)
+    assert body["precipitation24hMm"] == 3.2
+    assert "rainingNow" in body and "rainingPoints" in body

@@ -27,10 +27,10 @@ async def locate(session: AsyncSession, latitude: float, longitude: float) -> st
 async def weather_points(
     session: AsyncSession,
     bbox: tuple[float, float, float, float],
-    offset: int,
-    limit: int,
     parent: str | None = None,
+    limit: int = 2500,
 ) -> list[tuple[str, str, str, float, float]]:
+    """Municípios que intersectam a área, do centro para as bordas."""
     state = aliased(Territory)
     point = func.ST_PointOnSurface(TerritoryGeometry.geom)
     center = func.ST_SetSRID(func.ST_Point((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2), 4326)
@@ -53,7 +53,6 @@ async def weather_points(
         .join(TerritoryGeometry, TerritoryGeometry.territory_id == Territory.id)
         .where(*conditions)
         .order_by(func.ST_Distance(point, center), Territory.ibge_code)
-        .offset(offset)
         .limit(limit)
     )
     return [

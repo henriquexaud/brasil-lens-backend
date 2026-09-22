@@ -32,6 +32,8 @@ from app.schemas.map import (
     MapIndicatorMeta,
     MapScope,
     MapStatistics,
+    MapValue,
+    MapValuesResponse,
 )
 from app.services.classification import DEFAULT_CLASS_COUNT, describe
 
@@ -53,6 +55,13 @@ _cache: TTLCache[MapFeatureCollection] = TTLCache(
     ttl_seconds=settings.read_cache_ttl_seconds,
     max_entries=settings.read_cache_max_entries,
 )
+_values_cache: TTLCache[MapValuesResponse] = TTLCache(
+    ttl_seconds=settings.read_cache_ttl_seconds,
+    max_entries=settings.read_cache_max_entries,
+)
+# A versão é relida a cada minuto: uma ingestão aparece no mapa (e muda o
+# ETag) sem que cada requisição consulte `ingestion_runs`.
+_version_cache: TTLCache[int] = TTLCache(ttl_seconds=60, max_entries=1)
 
 
 def cache_stats() -> dict[str, int]:
@@ -61,6 +70,46 @@ def cache_stats() -> dict[str, int]:
 
 def clear_cache() -> None:
     _cache.clear()
+    _values_cache.clear()
+    _version_cache.clear()
+
+
+async def data_version(session: AsyncSession) -> int:
+    """Versão dos dados do mapa: muda a cada ingestão de territórios, malhas ou valores."""
+    cached = _version_cache.get("version")
+    if cached is not None:
+        return cached
+    version = await map_repo.fetch_data_version(session)
+    _version_cache.set("version", version)
+    return version
+
+
+def projection_key(
+    *,
+    level: TerritoryLevel,
+    parent_code: str | None,
+    indicator_key: str | None,
+    year: str,
+    lod: GeometryLOD | None,
+    classes: int,
+    version: int,
+) -> str:
+    """Identidade de uma projeção: chave do Redis e base do ETag.
+
+    Inclui a versão dos dados, para uma nova ingestão nunca ser servida (nem
+    revalidada com 304) a partir da resposta anterior.
+    """
+    return ":".join(
+        (
+            level.value,
+            parent_code or "root",
+            indicator_key or "none",
+            (year or "latest").strip().lower(),
+            (lod or _DEFAULT_LOD[level]).value,
+            str(classes),
+            str(version),
+        )
+    )
 
 
 async def get_map(
@@ -72,6 +121,7 @@ async def get_map(
     year: str = "latest",
     lod: GeometryLOD | None = None,
     classes: int = DEFAULT_CLASS_COUNT,
+    version: int | None = None,
 ) -> MapFeatureCollection:
     requested_year = (year or "latest").strip()
     target_year = _parse_year(requested_year)
@@ -79,25 +129,25 @@ async def get_map(
 
     _validate_scope(level, parent_code)
 
-    cache_key = (level, parent_code, indicator_key, requested_year, effective_lod, classes)
-    cached = _cache.get(cache_key)
+    if version is None:
+        version = await data_version(session)
+    redis_key = projection_key(
+        level=level,
+        parent_code=parent_code,
+        indicator_key=indicator_key,
+        year=requested_year,
+        lod=effective_lod,
+        classes=classes,
+        version=version,
+    )
+    cached = _cache.get(redis_key)
     if cached is not None:
         return cached
 
-    redis_key = ":".join(
-        (
-            level.value,
-            parent_code or "root",
-            indicator_key or "none",
-            requested_year,
-            effective_lod.value,
-            str(classes),
-        )
-    )
     cached_redis = await redis_cache.read("map-projection", redis_key, MapFeatureCollection)
     if cached_redis is not None:
         if len(cached_redis.features) <= settings.read_cache_max_features:
-            _cache.set(cache_key, cached_redis)
+            _cache.set(redis_key, cached_redis)
         return cached_redis
 
     parent_id = await _resolve_parent(session, level, parent_code)
@@ -213,8 +263,96 @@ async def get_map(
     # (comprimido com zlib) cabem todas — MG ocupa ~500 KB — e isso poupa o
     # custo do PostGIS também para as projeções municipais.
     if len(features) <= settings.read_cache_max_features:
-        _cache.set(cache_key, response)
+        _cache.set(redis_key, response)
     await redis_cache.write("map-projection", redis_key, response, 86400)
+    return response
+
+
+async def get_map_values(
+    session: AsyncSession,
+    *,
+    level: TerritoryLevel,
+    parent_code: str | None = None,
+    indicator_key: str,
+    year: str = "latest",
+    classes: int = DEFAULT_CLASS_COUNT,
+    version: int | None = None,
+) -> MapValuesResponse:
+    """Os valores de `get_map`, sem geometria: o cliente já tem a malha do escopo.
+
+    Mesma consulta, mesma resolução de `latest` e mesma classificação — só não
+    serializa a geometria, que é quase todo o peso da resposta.
+    """
+    requested_year = (year or "latest").strip()
+    target_year = _parse_year(requested_year)
+    _validate_scope(level, parent_code)
+    if version is None:
+        version = await data_version(session)
+    key = projection_key(
+        level=level,
+        parent_code=parent_code,
+        indicator_key=indicator_key,
+        year=requested_year,
+        lod=None,
+        classes=classes,
+        version=version,
+    )
+    if (cached := _values_cache.get(key)) is not None:
+        return cached
+    if (shared := await redis_cache.read("map-values", key, MapValuesResponse)) is not None:
+        _values_cache.set(key, shared)
+        return shared
+
+    parent_id = await _resolve_parent(session, level, parent_code)
+    catalog = await indicators_repo.list_catalog(session, level=level, key=indicator_key)
+    if not catalog:
+        raise IndicatorNotFoundError(indicator_key)
+    catalog_entry = catalog[0]
+    indicator_id = await indicators_repo.get_indicator_id(session, indicator_key)
+    projection = await map_repo.fetch_map_projection(
+        session,
+        level=level,
+        lod=_DEFAULT_LOD[level],
+        parent_id=parent_id,
+        indicator_id=indicator_id,
+        year=target_year,
+        with_geometry=False,
+    )
+    distribution = describe([row.value for row in projection.features], classes=classes)
+    response = MapValuesResponse(
+        level=level,
+        parent=parent_code,
+        indicator=MapIndicatorMeta(
+            key=catalog_entry.key,
+            name=catalog_entry.name,
+            unit=catalog_entry.unit,
+            decimal_places=catalog_entry.decimal_places,
+            year=projection.resolved_year,
+            requested_year=requested_year,
+            available_years=catalog_entry.available_years,
+        ),
+        statistics=(
+            MapStatistics.model_validate(distribution.statistics, from_attributes=True)
+            if distribution.statistics is not None
+            else None
+        ),
+        classification=(
+            MapClassification.model_validate(distribution.classification, from_attributes=True)
+            if distribution.classification is not None
+            else None
+        ),
+        values=[
+            MapValue(
+                ibge_code=row.ibge_code,
+                value=row.value,
+                normalized_value=distribution.normalize(row.value),
+                class_index=distribution.class_index(row.value),
+            )
+            for row in projection.features
+        ],
+    )
+    _values_cache.set(key, response)
+    await redis_cache.write("map-values", key, response, 86400)
     return response
 
 

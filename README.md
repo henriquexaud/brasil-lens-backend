@@ -397,6 +397,7 @@ Base: `/api/v1`. Erros usam um envelope único, incluindo os 422 de validação:
 | `GET` | `/territories/{ibge_code}/overview?year=` | projeção da tela de detalhe |
 | `GET` | `/territories/{ibge_code}/indicators` | séries históricas |
 | `GET` | `/map?level=&parent=&indicator=&year=&lod=&classes=` | projeção do mapa |
+| `GET` | `/map/values?level=&parent=&indicator=&year=&classes=` | os mesmos valores e classes, sem geometria |
 | `GET` | `/views` | visualizações salvas, mais recentes primeiro |
 | `POST` | `/views` | cria uma visualização — `201` + `Location` |
 | `GET` | `/views/{id}` | uma visualização |
@@ -795,16 +796,22 @@ indica o próximo lote, ou `null` ao terminar. O limite máximo é 40; a consult
 usa uma chamada com múltiplas coordenadas e aquece o cache de cada município.
 
 Retorna temperatura, sensação térmica, umidade, vento em km/h, precipitação
-com duração explícita do intervalo e previsão diária de três dias. São
+com duração explícita do intervalo e previsão diária de três dias. Toda leitura
+traz também a chuva acumulada nas últimas 24 h (`precipitation24hMm`, a soma
+horária até o instante da leitura), o total e a probabilidade de chuva de hoje e
+`rainingNow` (precipitação no último intervalo ou código WMO de chuva) — na mesma
+chamada, sem passar de dez variáveis por coordenada. São
 estimativas de modelos, não medições de estações. Os instantes são UTC e as
 datas da previsão respeitam o fuso do local.
 
-O cache dura dez minutos e tem limite de 128 entradas por processo. Falhas
-preservam o último resultado por no máximo duas horas de idade, marcado
-`stale`, com os horários originais; sem dado utilizável a API responde 502.
-Novas tentativas após falhas têm intervalo mínimo de um minuto por local.
-Condições atuais e previsões têm chaves independentes. A deduplicação ocorre
-por chave, de modo que uma consulta selecionada não espera o lote de fundo.
+O cache guarda uma leitura por município, compartilhada por todas as rotas e
+usuários (memória e Redis): a cidade selecionada vale 15 minutos a partir do
+horário da leitura, as camadas do mapa 30 minutos; depois disso a leitura é
+servida enquanto é renovada em segundo plano, por até duas horas. Com a fonte
+fora do ar ou sem cota, o último resultado de até doze horas é servido como
+`stale`, com os horários originais; sem dado utilizável a API responde com o
+erro real. Uma queda pausa a fonte por um minuto; a cota esgotada, pelo tempo
+indicado pela Open-Meteo. Uma consulta selecionada nunca espera um lote de fundo.
 
 Os avisos oficiais continuam em `/weather/alerts`, atualizados pelo scheduler
 do INMET. A importação legada de estações não roda no scheduler, pois não
@@ -881,13 +888,20 @@ com período anterior sem uma segunda janela validada.
 - `GET /api/v1/weather/capitals?offset=0&limit=6`: condições atuais das capitais,
   primeiro com cobertura das cinco regiões, depois completando as 27 UFs.
   Selecionar uma UF consulta apenas sua capital e reutiliza o cache do lote.
-- `GET /api/v1/weather/viewport?bbox=...&offset=0&limit=20`: clima atual paginado
-  dos municípios que intersectam o viewport, começando pelo centro. Reutiliza cache
-  individual e só busca os municípios faltantes, sempre sem previsão diária.
+- `GET /api/v1/weather/states`: chuva de cada UF para o mapa do Brasil — média do
+  acumulado de 24 h em quatro pontos dispersos (a capital e os três seguintes da
+  amostra do estado, reaproveitados ao abrir a UF), com `rainingNow` e quantos
+  pontos têm chuva agora (`rainingPoints`/`rainPoints`).
+- `GET /api/v1/weather/viewport?bbox=...&zoom=8&parent=35`: clima atual de todos os
+  municípios que intersectam a área, do centro para as bordas. Mede um município por
+  célula da grade (0,5° no zoom 8, 0,25° no 9, todos a partir do 10) e estima os demais;
+  reaproveita a amostra do estado e qualquer leitura já guardada.
 
 O Compose inicia Redis na rede interna, sem porta pública, com volume AOF, limite
 256 MB e política allkeys-lru. `REDIS_URL` configura o serviço; vazio mantém fallback
-local. Chaves versionadas e comprimidas guardam clima (10 min), fallback (até 2h),
-metadados INPE (10 min), resumo de intervalo (2h) e malhas/hidrografia (24h).
+local. Chaves versionadas e comprimidas guardam as leituras de clima por município
+(até 12h, com a validade decidida pelo horário da leitura), metadados INPE (10 min),
+resumo de intervalo (2h), projeções do mapa (24h, por versão da ingestão) e
+malhas/hidrografia (24h).
 Falha ou timeout de Redis não bloqueia a fonte; TTLs e idade de observação continuam
 validados. Geolocalização precisa não é persistida nesse cache.

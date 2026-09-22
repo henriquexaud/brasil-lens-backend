@@ -11,6 +11,8 @@ Três pontos não-obvios configurados aqui:
   `{"error": {...}}`, para o frontend ter um só formato a tratar.
 """
 
+import asyncio
+import contextlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -26,11 +28,17 @@ from app.core.config import settings
 from app.core.errors import DomainError, error_body
 from app.core.logging import configure_logging, get_logger
 from app.core.redis_cache import close as close_redis
-from app.db.session import dispose_engine
+from app.db.session import SessionFactory, dispose_engine
 from app.jobs import weather_scheduler
+from app.services import hydrography
 
 configure_logging()
 logger = get_logger(__name__)
+
+
+async def _warm_hydrography() -> None:
+    async with SessionFactory() as session:
+        await hydrography.warm_up(session)
 
 
 @asynccontextmanager
@@ -40,7 +48,14 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     # app/jobs/weather_scheduler.py sobre por que é um laço em processo e não
     # um cron externo.
     weather_scheduler.start()
+    warm_up = (
+        asyncio.create_task(_warm_hydrography()) if settings.hydrography_warmup_enabled else None
+    )
     yield
+    if warm_up is not None:
+        warm_up.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await warm_up
     await weather_scheduler.stop()
     await dispose_engine()
     await close_redis()

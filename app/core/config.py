@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     read_cache_max_features: int = 200
     # Cache-Control max-age das respostas geográficas.
     http_cache_max_age: int = 300
+    # /map e /map/values: o ETag carrega a versão da ingestão, então o navegador
+    # pode reusar a malha por mais tempo e revalidar em segundo plano.
+    map_http_cache_max_age: int = 3600
+    map_http_stale_while_revalidate: int = 86400
 
     ibge_base_url: str = "https://servicodados.ibge.gov.br"
     ibge_http_timeout: float = 120.0
@@ -64,6 +68,9 @@ class Settings(BaseSettings):
     # no lifespan da API. Desligado em teste/CI por padrão via .env, para não
     # depender de rede externa ao rodar a suíte.
     weather_refresh_enabled: bool = True
+    # Aquece a hidrografia nacional (consulta lenta à ANA) em segundo plano no
+    # startup da API.
+    hydrography_warmup_enabled: bool = True
     weather_refresh_interval_seconds: int = 600
     # TTL de resposta HTTP das rotas /weather/* — curto porque o dado já é
     # barato de ler (vem do Postgres, não da fonte externa); só evita reler a

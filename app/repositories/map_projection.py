@@ -98,7 +98,8 @@ _MAP_SQL = text(
            s.bbox_north,
            v.value,
            (SELECT reference_year FROM target_year) AS resolved_year,
-           ST_AsGeoJSON(g.geom) AS geometry_json
+           CASE WHEN CAST(:with_geometry AS boolean)
+                THEN ST_AsGeoJSON(g.geom) ELSE '' END AS geometry_json
       FROM scope s
       JOIN territory_geometries g
              ON g.territory_id = s.id
@@ -120,12 +121,15 @@ async def fetch_map_projection(
     parent_id: int | None = None,
     indicator_id: int | None = None,
     year: int | None = None,
+    with_geometry: bool = True,
 ) -> MapProjection:
     """Executa a projeção do mapa.
 
     `indicator_id=None` devolve apenas a geometria (mapa base sem coropleta):
     o LEFT JOIN simplesmente não casa e todos os valores vêm nulos, sem
-    precisar de uma segunda query.
+    precisar de uma segunda query. `with_geometry=False` faz o inverso — só os
+    valores, com `geometry_json` vazio — para trocar indicador ou ano sem
+    retransmitir a malha.
     """
     result = await session.execute(
         _MAP_SQL,
@@ -135,6 +139,7 @@ async def fetch_map_projection(
             "parent_id": parent_id,
             "indicator_id": indicator_id,
             "year": year,
+            "with_geometry": with_geometry,
         },
     )
 
@@ -205,3 +210,23 @@ async def fetch_single_feature(
         geometry_json=result.geometry_json,
         bbox=(result.bbox_west, result.bbox_south, result.bbox_east, result.bbox_north),
     )
+
+
+# Jobs cuja execução muda o que o mapa desenha. Os de clima rodam a cada poucos
+# minutos e não entram: invalidariam o cache do mapa sem mudar nada nele.
+_MAP_JOBS = ("import_territories", "import_geometries", "import_indicators", "seed_indicators")
+
+_DATA_VERSION_SQL = text(
+    """
+    SELECT COALESCE(CAST(EXTRACT(EPOCH FROM MAX(finished_at)) AS bigint), 0)
+      FROM ingestion_runs
+     WHERE job = ANY(CAST(:jobs AS text[]))
+       AND status IN ('succeeded', 'partial')
+    """
+)
+
+
+async def fetch_data_version(session: AsyncSession) -> int:
+    """Instante (epoch) da última ingestão que alterou territórios, malhas ou valores."""
+    result = await session.execute(_DATA_VERSION_SQL, {"jobs": list(_MAP_JOBS)})
+    return int(result.scalar_one())

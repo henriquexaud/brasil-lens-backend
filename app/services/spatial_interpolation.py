@@ -62,6 +62,8 @@ def interpolate_municipal_weather(
     has_precip_sum = False
     weighted_precip_prob = 0.0
     has_precip_prob = False
+    weighted_rain_24h = 0.0
+    has_rain_24h = False
 
     for dist_sq, city in k_nearest:
         weight = 1.0 / dist_sq
@@ -87,6 +89,9 @@ def interpolate_municipal_weather(
         if city.precipitation_probability_pct is not None:
             weighted_precip_prob += city.precipitation_probability_pct * weight
             has_precip_prob = True
+        if city.precipitation_24h_mm is not None:
+            weighted_rain_24h += city.precipitation_24h_mm * weight
+            has_rain_24h = True
 
     est_temp = weighted_temp / total_weight if total_weight > 0 else closest_city.temperature_c
     est_apparent = (
@@ -126,6 +131,11 @@ def interpolate_municipal_weather(
         precipitation_sum_mm=est_precip_sum,
         precipitation_probability_pct=est_precip_prob,
         precipitation_interval_minutes=closest_city.precipitation_interval_minutes,
+        precipitation_24h_mm=(
+            round(weighted_rain_24h / total_weight, 1) if has_rain_24h and total_weight else None
+        ),
+        # Chuva agora é local: a estimativa segue a medição mais próxima, não a média.
+        raining_now=closest_city.raining_now,
         weather_code=closest_city.weather_code or 0,
         forecast=[],
         is_inferred=True,

@@ -121,6 +121,14 @@ class WeatherCity(CamelModel):
     precipitation_probability_pct: FiniteFloat | None = None
     precipitation_interval_minutes: int
     weather_code: int | None
+    # Acumulado das últimas 24 h, o que o mapa de chuva pinta; `precipitation_mm`
+    # é só o intervalo mais recente e `precipitation_sum_mm`, o total de hoje.
+    precipitation_24h_mm: FiniteFloat | None = Field(default=None, alias="precipitation24hMm")
+    # Chovendo no intervalo mais recente (precipitação ou código de chuva).
+    raining_now: bool = False
+    # Visão do Brasil: quantos pontos do estado compõem a chuva e quantos têm chuva agora.
+    rain_points: int | None = None
+    raining_points: int | None = None
     forecast: list[WeatherForecastDay]
     is_inferred: bool = False
 
@@ -162,7 +170,14 @@ def build_weather_summary(cities: list[WeatherCity]) -> WeatherSummary:
             coldest = [c for c in sorted_asc if c.id not in hottest_ids][:max_per_group]
 
     def _rain_val(c: WeatherCity) -> float:
-        val = c.precipitation_sum_mm if c.precipitation_sum_mm is not None else c.precipitation_mm
+        val = next(
+            (
+                v
+                for v in (c.precipitation_24h_mm, c.precipitation_sum_mm, c.precipitation_mm)
+                if v is not None
+            ),
+            None,
+        )
         return float(val) if val is not None and math.isfinite(val) else 0.0
 
     valid_rain = [c for c in cities if _rain_val(c) > 0]

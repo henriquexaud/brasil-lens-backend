@@ -112,13 +112,17 @@ async def fetch_locations(
                 "longitude": ",".join(str(city[3]) for city in locations),
                 "current": "temperature_2m,relative_humidity_2m,apparent_temperature,"
                 "precipitation,weather_code,wind_speed_10m",
-                **(
-                    {
-                        "daily": "weather_code,temperature_2m_max,temperature_2m_min,"
-                        "precipitation_probability_max,precipitation_sum"
-                    }
+                # Chuva por hora nas últimas 24 h: o acumulado que o mapa pinta.
+                "hourly": "precipitation",
+                "past_hours": 24,
+                "forecast_hours": 1,
+                # Mesmo sem previsão, o total e a probabilidade de hoje. Até dez
+                # variáveis a coordenada conta como uma única consulta.
+                "daily": (
+                    "weather_code,temperature_2m_max,temperature_2m_min,"
+                    "precipitation_probability_max,precipitation_sum"
                     if include_forecast
-                    else {}
+                    else "precipitation_probability_max,precipitation_sum"
                 ),
                 "timezone": "auto",
                 "forecast_days": 3 if include_forecast else 1,
@@ -141,6 +145,22 @@ async def fetch_locations(
         ]
     except (httpx.HTTPError, ValueError, TypeError, KeyError, IndexError) as exc:
         raise ProviderError("Não foi possível consultar o clima na Open-Meteo.") from exc
+
+
+# Chuvisco, chuva, chuva congelante, pancadas e trovoadas (códigos WMO).
+RAIN_CODES = frozenset({*range(51, 68), *range(80, 83), 95, 96, 99})
+
+
+def _last_24h(hourly: dict[str, Any], until: int) -> float | None:
+    """Soma a chuva horária até o instante da leitura (as horas futuras ficam fora)."""
+    values = [
+        value
+        for time, value in zip(
+            hourly.get("time", []), hourly.get("precipitation", []), strict=False
+        )
+        if time <= until and value is not None
+    ]
+    return round(sum(values), 1) if values else None
 
 
 def _parse_city(raw: dict[str, Any], capital: tuple[str, str, float, float]) -> WeatherCity:
@@ -167,6 +187,8 @@ def _parse_city(raw: dict[str, Any], capital: tuple[str, str, float, float]) -> 
         precipitation_probability_pct=precip_probs[0] if precip_probs else None,
         precipitation_interval_minutes=current["interval"] // 60,
         weather_code=current.get("weather_code"),
+        precipitation_24h_mm=_last_24h(raw.get("hourly", {}), current["time"]),
+        raining_now=bool(current.get("precipitation")) or current.get("weather_code") in RAIN_CODES,
         forecast=[
             WeatherForecastDay(
                 date=datetime.fromtimestamp(timestamp, timezone).date(),

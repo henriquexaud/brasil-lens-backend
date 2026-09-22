@@ -368,6 +368,10 @@ async def get_hydrography(
     zoom: float = 4,
 ) -> HydroFeatureCollection:
     drainage, _, tolerance = hydro_detail(zoom)
+    if level == "country" and zoom < 6:
+        # Na escala nacional a camada é a mesma para qualquer enquadramento:
+        # uma só entrada de cache, compartilhada e aquecida ao subir a API.
+        parent_code, bbox = None, None
     effective_bbox = bbox
     if effective_bbox is None and parent_code:
         territory = await territories_repo.get_by_code(session, parent_code)
@@ -441,3 +445,15 @@ async def get_hydrography(
             _cache.set(key, result)
             await redis_cache.write("hydrography", key, result, CACHE_TTL_SECONDS)
         return result
+
+
+async def warm_up(session: AsyncSession) -> None:
+    """Prepara a camada nacional — a primeira pedida — fora do caminho do usuário.
+
+    A consulta à ANA leva segundos; feita no startup, o primeiro visitante que
+    liga a hidrografia já encontra o cache pronto.
+    """
+    try:
+        await get_hydrography(session)
+    except Exception:
+        logger.warning("hydrography.warm_up_failed", exc_info=True)

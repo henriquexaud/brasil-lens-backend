@@ -9,7 +9,11 @@ se o banco estiver vazio.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 import pytest
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,6 +37,23 @@ def _isolated_cache() -> None:
     """Sem isto, um teste veria a resposta cacheada por outro."""
     map_service.clear_cache()
     indicators_service.clear_cache()
+
+
+@asynccontextmanager
+async def _api(session: AsyncSession) -> AsyncIterator[AsyncClient]:
+    """Cliente HTTP da API usando a sessão do teste (o pool global é de outro loop)."""
+    from app.api.deps import get_session
+    from app.main import app
+
+    async def override() -> AsyncIterator[AsyncSession]:
+        yield session
+
+    app.dependency_overrides[get_session] = override
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            yield client
+    finally:
+        app.dependency_overrides.pop(get_session, None)
 
 
 async def _require_ingested_data(session: AsyncSession) -> None:
@@ -336,11 +357,7 @@ async def test_projecao_compartilhada_e_servida_do_cache(session: AsyncSession) 
 
 async def test_projecao_com_etag_e_304(session: AsyncSession) -> None:
     await _require_ingested_data(session)
-    from httpx import ASGITransport, AsyncClient
-
-    from app.main import app
-
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with _api(session) as client:
         res1 = await client.get("/api/v1/map?level=state")
         assert res1.status_code == 200
         etag = res1.headers.get("etag")
@@ -350,3 +367,63 @@ async def test_projecao_com_etag_e_304(session: AsyncSession) -> None:
         res2 = await client.get("/api/v1/map?level=state", headers={"If-None-Match": etag})
         assert res2.status_code == 304
         assert res2.text == ""
+
+
+async def test_etag_carrega_a_versao_dos_dados_e_304_nao_monta_a_projecao(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _require_ingested_data(session)
+    async with _api(session) as client:
+        first = await client.get("/api/v1/map?level=state&lod=overview")
+        etag = first.headers["etag"]
+        assert "stale-while-revalidate" in first.headers["cache-control"]
+
+        async def unexpected(*_: object, **__: object) -> None:
+            raise AssertionError("um 304 não pode montar a projeção")
+
+        monkeypatch.setattr(map_service, "get_map", unexpected)
+        cached = await client.get(
+            "/api/v1/map?level=state&lod=overview", headers={"If-None-Match": etag}
+        )
+        assert cached.status_code == 304
+        monkeypatch.undo()
+
+        # Nova ingestão: o mesmo pedido deixa de casar com a versão anterior.
+        async def next_version(_: AsyncSession) -> int:
+            return 1
+
+        monkeypatch.setattr(map_service, "data_version", next_version)
+        fresh = await client.get(
+            "/api/v1/map?level=state&lod=overview", headers={"If-None-Match": etag}
+        )
+        assert fresh.status_code == 200
+        assert fresh.headers["etag"] != etag
+
+
+async def test_valores_sem_geometria_coincidem_com_a_projecao(session: AsyncSession) -> None:
+    await _require_ingested_data(session)
+    full = await map_service.get_map(
+        session, level=TerritoryLevel.MUNICIPALITY, parent_code="35", indicator_key="population"
+    )
+    values = await map_service.get_map_values(
+        session, level=TerritoryLevel.MUNICIPALITY, parent_code="35", indicator_key="population"
+    )
+    assert values.indicator == full.indicator
+    assert values.classification == full.classification
+    assert values.statistics == full.statistics
+    by_code = {item.ibge_code: item for item in values.values}
+    assert len(by_code) == len(full.features)
+    for feature in full.features:
+        value = by_code[feature.properties.ibge_code]
+        assert value.value == feature.properties.value
+        assert value.class_index == feature.properties.class_index
+
+    async with _api(session) as client:
+        response = await client.get(
+            "/api/v1/map/values?level=municipality&parent=35&indicator=population"
+        )
+        assert response.status_code == 200
+        assert "geometry" not in response.text
+        assert len(response.content) < 100_000
+        missing = await client.get("/api/v1/map/values?level=state&indicator=nope")
+        assert missing.status_code == 404

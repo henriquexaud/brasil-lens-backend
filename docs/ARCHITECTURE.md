@@ -654,6 +654,21 @@ cacheadas com 100% de acerto em repetição; as municipais, que são cauda longa
 (cada usuário abre um estado diferente), passam a depender apenas do
 `Cache-Control` do cliente.
 
+### Malha e valores separados; ETag pela versão da ingestão
+
+`/map/values` é a projeção de `/map` sem geometria (mesma consulta, com
+`with_geometry=false`): o frontend baixa a malha uma vez por recorte e LOD e,
+ao trocar indicador ou ano, só os valores — 0,8 kB nos estados e 10 kB nos
+municípios de MG, contra 265 kB e 557 kB da projeção completa. Contorno dos
+estados, coropleta e clima passam a dividir a mesma consulta de geometria.
+
+O ETag de ambas as rotas é a identidade da projeção mais a **versão dos dados**
+(instante da última ingestão de territórios, malhas ou indicadores, relido a
+cada minuto). Por isso é decidido antes de montar a resposta — um 304 não toca
+o PostGIS — e uma nova ingestão nunca é revalidada contra a resposta anterior.
+A versão também entra nas chaves do Redis e do cache em processo. Com essa
+garantia, o `Cache-Control` do mapa é `max-age=3600, stale-while-revalidate=86400`.
+
 ### Um falso positivo, registrado
 
 Durante a revisão, a API foi derrubada para testar o comportamento de erro e a
@@ -930,22 +945,32 @@ polígonos: `/weather/current?territory=<IBGE>` usa a capital para estados e
 um ponto interno da malha para municípios. A interface explicita essa referência.
 Sem território selecionado, uma consulta em lote fornece as 27 capitais.
 
-A Open-Meteo é consultada sob demanda no backend, com cache de dez minutos,
-limite de 128 entradas e deduplicação de consultas simultâneas por chave. Essa rota é uma
-exceção à leitura exclusivamente offline dos indicadores IBGE. A resposta
-inclui fonte, horário e condição atual; `forecast=false` omite os três dias de
-previsão, que têm cache independente e são consultados ao expandir a seção. Falhas têm
-cooldown de um minuto; o último dado pode ser exibido como `stale` por até duas
-horas, conservando o horário original. Sem dado utilizável, retorna 502.
+A Open-Meteo é consultada sob demanda no backend. Essa rota é uma exceção à
+leitura exclusivamente offline dos indicadores IBGE. A fonte conta cada
+coordenada como uma consulta, então a unidade de cache é a **leitura de cada
+município** (`services/weather_forecast.py`), não o lote: capitais, amostra do
+estado, lotes, área visível e seleção resolvem os mesmos pontos em memória →
+Redis (`MGET`) → fonte, e só o que falta vai à Open-Meteo, numa chamada.
+Consultas simultâneas ao mesmo município esperam a mesma requisição, que segue
+mesmo se o cliente desistir. A capital lida no mapa do Brasil é a mesma leitura
+do município quando ele é selecionado.
 
-Ao entrar em uma UF, o frontend prioriza a malha e então antecipa as condições
-atuais via `/weather/municipalities?parent=<UF>&offset=0&limit=40`. A paginação
-por código IBGE retorna `nextOffset`; cada lote usa uma requisição pública com
-múltiplos pontos internos da malha. As respostas alimentam o cache individual
-do backend e do React Query. Apenas um lote é solicitado por vez, com intervalo
-de cinco segundos; as consultas selecionadas pausam o início do próximo lote
-e não disputam sua trava. Sair da UF cancela a requisição de fundo. O frontend
-mantém páginas completas no cache, revalidando-as ao retornar após cinco minutos.
+O frescor acompanha a fonte, cujas condições atuais mudam a cada 15 minutos: a
+cidade selecionada vale 15 minutos a partir do horário da leitura; capitais,
+amostra do estado e área visível, 30 minutos. Vencida, a leitura é servida e
+renovada em segundo plano por até duas horas. Com a fonte fora do ar (pausa de
+60 s para toda a fonte) ou sem cota (pausa pelo tempo que a própria fonte
+indica), vale o último dado de até doze horas, marcado `stale` com o horário
+original. Sem dado utilizável, retorna o erro real (502 ou 503). A previsão de
+três dias (`forecast=true`) tem leitura própria e já grava as condições atuais.
+
+Ao entrar em uma UF, `/weather/state` mede uma amostra de 20 municípios
+dispersos e estima os demais (IDW). No zoom próximo, `/weather/viewport` mede
+uma cidade por célula da grade — 0,5° no zoom 8, 0,25° no 9 e todos a partir
+do 10, se a área for pequena — preferindo a amostra do estado e os já medidos na
+grade maior, e estima os vizinhos a partir de todas as leituras disponíveis.
+Medido no banco: o zoom 8 em SP consulta 58 coordenadas, não 387; em MG, 114,
+não 624. `/weather/municipalities` pagina a UF e só é usado se o estado falhar.
 
 O painel reutiliza a hierarquia sociopolítica: seleção mostra o valor principal,
 previsão e detalhes ficam recolhidos, e avisos/fontes só são consultados quando
@@ -963,8 +988,8 @@ CEMADEN, sem endpoint público confirmado, foi removido.
 
 Uma falha do INPE ou da ANA pausa a fonte inteira por 60 s (`app/core/cooldown.py`):
 nesse intervalo as rotas respondem na hora — erro para focos, snapshot local para
-hidrografia — em vez de cada recorte esperar um novo timeout. A Open-Meteo mantém
-a pausa própria por cota e a falha lembrada por recorte (`services/weather_forecast.py`).
+hidrografia — em vez de cada recorte esperar um novo timeout. A Open-Meteo usa a
+mesma pausa de 60 s para quedas e uma pausa própria, mais longa, para a cota.
 
 O BDQueimadas publica dezenas de milhares de detecções em uma janela de 48 horas.
 A camada reutiliza a pintura territorial: estados na visão Brasil e municípios
@@ -999,7 +1024,10 @@ rios simplificados aparecem antes de lagos. No zoom nacional, apenas 18 eixos do
 snapshot atendem ao filtro de drenagem de 200.000 km². As faixas seguintes reduzem
 os limiares e tolerâncias. O backend recorta linhas no viewport e consulta polígonos
 por área de superfície, em páginas de IDs da ANA. Desligar a camada cancela trabalho
-pendente; nenhuma geometria do viewport anterior aparece como placeholder.
+pendente; nenhuma geometria do viewport anterior aparece como placeholder. Na escala
+nacional a camada não depende do enquadramento: todas as requisições dividem uma
+entrada de cache, aquecida em segundo plano ao subir a API (a primeira consulta à
+ANA levava 5,5 s).
 
 
 Redis complementa caches locais das fontes e compartilha resultados entre usuários

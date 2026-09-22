@@ -28,6 +28,7 @@ from app.services.weather_forecast import (
     get_current,
     get_municipalities_current,
     get_state_weather,
+    get_states_rain,
     get_territory_current,
     get_viewport_current,
 )
@@ -111,17 +112,18 @@ async def get_state_weather_endpoint(
     return await get_state_weather(session, parent)
 
 
-@router.get("/viewport", response_model=WeatherCurrentResponse)
+@router.get(
+    "/viewport",
+    response_model=WeatherCurrentResponse,
+    summary="Municípios da área visível: uma leitura por célula e os demais estimados",
+)
 async def viewport_weather(
     session: Annotated[AsyncSession, Depends(get_session)],
     bbox: str,
     parent: Annotated[str | None, Query(pattern=r"^\d{2}$")] = None,
-    offset: Annotated[int, Query(ge=0, le=6000)] = 0,
-    limit: Annotated[int, Query(ge=1, le=40)] = 20,
+    zoom: Annotated[int, Query(ge=0, le=22)] = 8,
 ) -> WeatherCurrentResponse:
-    return await get_viewport_current(
-        session, parse_bbox(bbox, max_span=20), offset, limit, parent=parent
-    )
+    return await get_viewport_current(session, parse_bbox(bbox, max_span=20), zoom, parent=parent)
 
 
 @router.get("/municipal-boundaries", response_model=MapFeatureCollection)
@@ -153,3 +155,14 @@ async def capitals_weather(
     limit: Annotated[int, Query(ge=1, le=9)] = 6,
 ) -> WeatherCurrentResponse:
     return await get_capitals_current(offset, limit)
+
+
+@router.get(
+    "/states",
+    response_model=WeatherCurrentResponse,
+    summary="Chuva de cada UF (média de pontos dispersos) para o mapa do Brasil",
+)
+async def states_rain(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> WeatherCurrentResponse:
+    return await get_states_rain(session)

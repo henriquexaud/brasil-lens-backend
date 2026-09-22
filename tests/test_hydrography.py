@@ -171,3 +171,20 @@ async def test_ana_outage_pauses_calls_and_serves_partial_snapshot(monkeypatch) 
     assert first.metadata.status == second.metadata.status == "partial"
     assert rivers.call_count == 1
     assert bodies.call_count == 0
+
+
+async def test_national_scale_shares_one_cache_entry_for_any_framing(monkeypatch):
+    service._cache.clear()
+    bodies = AsyncMock(return_value=[])
+    monkeypatch.setattr(service, "_fetch_water_bodies", bodies)
+    first = await service.get_hydrography(AsyncMock(), zoom=4, bbox=(-60, -30, -40, -10))
+    second = await service.get_hydrography(
+        AsyncMock(), zoom=4, bbox=(-55, -25, -35, -5), parent_code="35"
+    )
+    assert first is second
+    assert bodies.call_count == 1
+    assert first.bbox == service.BRAZIL_BBOX
+    # A mesma entrada que o startup aquece.
+    await service.warm_up(AsyncMock())
+    assert bodies.call_count == 1
+    service._cache.clear()

@@ -120,3 +120,23 @@ class MapFeatureCollection(CamelModel):
         if data.get("bbox") is None:
             data.pop("bbox", None)
         return data
+
+
+class MapValue(CamelModel):
+    """Valor de um território, sem geometria: casa com a feature pelo código IBGE."""
+
+    ibge_code: str
+    value: ApiDecimal | None = None
+    normalized_value: float | None = None
+    class_index: int | None = None
+
+
+class MapValuesResponse(CamelModel):
+    """Só os valores da coropleta. Trocar indicador ou ano não retransmite a malha."""
+
+    level: TerritoryLevel
+    parent: str | None = None
+    indicator: MapIndicatorMeta
+    statistics: MapStatistics | None = None
+    classification: MapClassification | None = None
+    values: list[MapValue]
