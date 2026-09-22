@@ -14,7 +14,7 @@ cada um alimenta.
 from __future__ import annotations
 
 from app.models import DataContext
-from app.providers import ibge, inmet, open_meteo
+from app.providers import cemaden, ibge, inmet, open_meteo
 from app.providers.descriptor import ProviderDescriptor
 
 # Fontes efetivamente disponíveis para os contextos públicos.
@@ -23,6 +23,7 @@ PROVIDERS: tuple[ProviderDescriptor, ...] = (
     ibge.PROVIDER_CLIMATE,
     open_meteo.PROVIDER,
     inmet.PROVIDER_ALERTS,
+    cemaden.PROVIDER_ALERTS,
 )
 
 

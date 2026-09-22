@@ -41,6 +41,7 @@ class AlertRow:
     event: str
     severity: str
     color: str | None
+    description: str | None
     onset: datetime
     expires: datetime
     affected_ibge_codes: list[str]
@@ -97,6 +98,7 @@ _LIST_ACTIVE_ALERTS_SQL = text(
            a.event,
            a.severity,
            a.color,
+           a.description,
            a.onset,
            a.expires,
            a.affected_ibge_codes,
@@ -151,6 +153,7 @@ async def list_active_alerts(session: AsyncSession) -> list[AlertRow]:
             event=row.event,
             severity=row.severity,
             color=row.color,
+            description=row.description,
             onset=row.onset,
             expires=row.expires,
             affected_ibge_codes=row.affected_ibge_codes,

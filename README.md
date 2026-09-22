@@ -813,15 +813,38 @@ fora do ar ou sem cota, o último resultado de até doze horas é servido como
 erro real. Uma queda pausa a fonte por um minuto; a cota esgotada, pelo tempo
 indicado pela Open-Meteo. Uma consulta selecionada nunca espera um lote de fundo.
 
-Os avisos oficiais continuam em `/weather/alerts`, atualizados pelo scheduler
-do INMET. A importação legada de estações não roda no scheduler, pois não
-estava produzindo leituras utilizáveis; o provider CEMADEN, que nunca teve um
-endpoint público confirmado, foi removido (o valor `cemaden` do enum
-`weather_provider` permanece no schema). `/weather/stations` continua
-compatível com dados previamente ingeridos. `/weather/sources` informa o
-estado da ingestão de avisos; `/weather/current` inclui sua própria fonte,
-status e horário de consulta. A API gratuita da Open-Meteo se destina a uso
-não comercial; consulte os termos do provedor para publicação comercial.
+`/weather/alerts` agrega duas fontes complementares, atualizadas pelo mesmo
+scheduler: o **INMET** avisa sobre o fenômeno meteorológico (chuva intensa,
+tempestade, vento, baixa umidade, onda de calor); o **CEMADEN** avisa sobre o
+risco/impacto geo-hidrológico associado (inundação, enxurrada, alagamento,
+deslizamento). Os dois produzem o mesmo modelo normalizado — `category`
+(`meteorological`/`geo_hydrological`) e `severityLevel` (`potential`/
+`danger`/`extreme`/`other`) são calculados a partir do vocabulário de cada
+fonte em `services/weather.py`, então o frontend nunca precisa saber o
+formato de nenhuma delas para decidir cor ou proeminência. Um aviso de chuva
+do INMET e um risco de deslizamento do CEMADEN na mesma cidade continuam dois
+alertas distintos — nunca são fundidos em um só. `provider` identifica a
+fonte em cada alerta (`"inmet"` ou `"cemaden"`).
+
+Assim como o INMET (`apiprevmet3.inmet.gov.br`, sem contrato de API
+publicado), o CEMADEN também não documenta uma API pública formalmente; a
+fonte usada (`app/providers/cemaden/`) é o GeoServer WFS que alimenta o
+próprio [Mapa Interativo](https://mapainterativo.cemaden.gov.br) do CEMADEN
+(camada `alertas_vigentes_siaden`) — protocolo OGC padrão e autodescritivo,
+a mesma técnica já usada para o INPE/BDQueimadas, o que reduz o risco de
+quebra mesmo sem documentação de negócio. Uma diferença real fica isolada no
+provider: o CEMADEN não manda uma data de expiração explícita, só um carimbo
+de "última confirmação" (`vigencia`) reemitido enquanto o risco persiste — a
+expiração gravada é `vigencia` mais um buffer configurável
+(`CEMADEN_ALERT_VALIDITY_BUFFER_SECONDS`, padrão 4 h), para um ciclo do
+scheduler perdido não apagar um risco real do mapa.
+
+A importação legada de estações não roda no scheduler, pois não estava
+produzindo leituras utilizáveis. `/weather/stations` continua compatível com
+dados previamente ingeridos. `/weather/sources` informa o estado da ingestão
+de cada fonte de alerta; `/weather/current` inclui sua própria fonte, status e
+horário de consulta. A API gratuita da Open-Meteo se destina a uso não
+comercial; consulte os termos do provedor para publicação comercial.
 
 ### Focos de calor (INPE)
 

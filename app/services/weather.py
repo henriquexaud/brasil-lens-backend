@@ -1,9 +1,12 @@
 """Regras de apresentação da camada meteorológica.
 
 Curto de propósito: ao contrário de `services/map.py`, não há `latest` para
-resolver, nem estatística, nem classificação — uma estação mostra sua
-**última** leitura (já resolvida em `repositories/weather.py` via `LATERAL`),
-e um alerta é ativo ou não aparece.
+resolver nem estatística — uma estação mostra sua **última** leitura (já
+resolvida em `repositories/weather.py` via `LATERAL`), e um alerta é ativo ou
+não aparece. A única classificação daqui é a de alertas: `category` e
+`severity_level` traduzem o vocabulário de cada fonte (INMET, CEMADEN) para
+um esquema comum que o frontend consome sem precisar conhecer nenhuma das
+duas (`_category_for`/`_severity_level_for`).
 """
 
 from __future__ import annotations
@@ -18,9 +21,11 @@ from app.core.config import settings
 from app.repositories import weather as weather_repo
 from app.repositories.weather import SourceStatusRow
 from app.schemas.weather import (
+    WeatherAlertCategory,
     WeatherAlertCollection,
     WeatherAlertFeature,
     WeatherAlertProperties,
+    WeatherAlertSeverityLevel,
     WeatherSourcesResponse,
     WeatherSourceStatus,
     WeatherSourceStatusValue,
@@ -29,11 +34,58 @@ from app.schemas.weather import (
     WeatherStationProperties,
 )
 
-# Apenas avisos oficiais são ingeridos automaticamente. Condições e previsão
-# são consultadas em services/weather_forecast.py, com cache independente.
+# Apenas avisos/alertas oficiais são ingeridos automaticamente. Condições e
+# previsão são consultadas em services/weather_forecast.py, com cache
+# independente.
 _SOURCE_DEFINITIONS: tuple[tuple[str, str, str, str | None], ...] = (
     ("import_weather_inmet_alerts", "inmet_alerts", "INMET — Avisos Meteorológicos", None),
+    (
+        "import_weather_cemaden_alerts",
+        "cemaden_alerts",
+        "CEMADEN — Alertas de Risco Geo-Hidrológico",
+        None,
+    ),
 )
+
+# Categoria comum: hoje é 100% função da fonte (o INMET só emite fenômeno
+# meteorológico; o CEMADEN só emite risco geo-hidrológico) — sem ambiguidade
+# real que justifique guardar isto como coluna (ver app/models/weather.py).
+_CATEGORY_BY_PROVIDER: dict[str, WeatherAlertCategory] = {
+    "cemaden": WeatherAlertCategory.GEO_HYDROLOGICAL,
+}
+
+
+def _category_for(provider: str) -> WeatherAlertCategory:
+    return _CATEGORY_BY_PROVIDER.get(provider, WeatherAlertCategory.METEOROLOGICAL)
+
+
+def _severity_level_for(provider: str, severity: str) -> WeatherAlertSeverityLevel:
+    """Classificação comum de severidade — a mesma escala de 3 níveis que o
+    frontend já desenhava antes (`AlertSeverityTier`), calculada aqui uma vez
+    em vez de adivinhada em cada render a partir de texto/cor por fonte (ver
+    `alertStyles.ts`). O vocabulário de `severity` é por fonte — INMET fala em
+    "perigo", CEMADEN em "alto"/"moderado" — por isso `provider` entra na
+    decisão, não só o texto.
+    """
+    text = (severity or "").strip().lower()
+    if provider == "cemaden":
+        if text == "muito alto":
+            return WeatherAlertSeverityLevel.EXTREME
+        if text == "alto":
+            return WeatherAlertSeverityLevel.DANGER
+        if text == "moderado":
+            return WeatherAlertSeverityLevel.POTENTIAL
+        return WeatherAlertSeverityLevel.OTHER
+    # INMET: "potencial" checado antes de "perigo" — "Perigo Potencial" contém
+    # as duas palavras (mesma ordem de checagem que alertStyles.ts já usava).
+    if "grande perigo" in text:
+        return WeatherAlertSeverityLevel.EXTREME
+    if "potencial" in text:
+        return WeatherAlertSeverityLevel.POTENTIAL
+    if "perigo" in text:
+        return WeatherAlertSeverityLevel.DANGER
+    return WeatherAlertSeverityLevel.OTHER
+
 
 # Uma fonte sem execução bem-sucedida há mais que isto (múltiplo da cadência
 # esperada) deixa de ser "ok" — tolera um ciclo perdido sem virar alarme falso.
@@ -96,9 +148,12 @@ async def get_alerts(session: AsyncSession) -> WeatherAlertCollection:
                 id=f"{row.provider}:{row.external_id}",
                 properties=WeatherAlertProperties(
                     provider=row.provider,
+                    category=_category_for(row.provider),
                     event=row.event,
                     severity=row.severity,
+                    severity_level=_severity_level_for(row.provider, row.severity),
                     color=row.color,
+                    description=row.description,
                     onset=row.onset,
                     expires=row.expires,
                     affected_ibge_codes=row.affected_ibge_codes,

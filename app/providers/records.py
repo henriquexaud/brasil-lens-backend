@@ -83,7 +83,16 @@ class WeatherObservationRecord:
 
 @dataclass(frozen=True, slots=True)
 class WeatherAlertRecord:
-    """Um alerta georreferenciado, já normalizado."""
+    """Um alerta georreferenciado, já normalizado.
+
+    `provider` é texto livre (não o enum `WeatherProvider`) de propósito: é a
+    mesma fronteira descrita no docstring do módulo — um provider novo não
+    deveria precisar importar um tipo de dentro de `app.models` só para se
+    anunciar. `description` é opcional porque nem toda fonte tem uma frase
+    livre além de `event`/`risks` (o INMET não tem; ver
+    `app/providers/inmet/alerts.py`); quem tem (o CEMADEN, onde `event` sozinho
+    não diz o município) preenche.
+    """
 
     provider: str
     external_id: str
@@ -93,6 +102,7 @@ class WeatherAlertRecord:
     expires: datetime
     polygon_geojson: dict[str, Any]
     color: str | None = None
+    description: str | None = None
     affected_ibge_codes: tuple[str, ...] = field(default_factory=tuple)
     risks: tuple[str, ...] = field(default_factory=tuple)
     instructions: tuple[str, ...] = field(default_factory=tuple)

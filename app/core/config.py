@@ -64,6 +64,29 @@ class Settings(BaseSettings):
     # completar sem depender de adivinhar o teto exato da fonte.
     inmet_max_concurrency: int = 2
 
+    # CEMADEN — riscos geo-hidrológicos (inundação, enxurrada, deslizamento),
+    # complementar aos avisos meteorológicos do INMET acima. Sem API pública
+    # documentada (ver docs/ARCHITECTURE.md, contexto Clima): a mesma situação
+    # de fato do INMET, cuja `inmet_alerts_base_url` também não é documentada
+    # — a diferença é que aqui a fonte real é um GeoServer OGC padrão (WFS),
+    # não um endpoint JSON ad-hoc, o que reduz a fragilidade (protocolo
+    # estável, `DescribeFeatureType` autodescritivo) mesmo sem documentação
+    # formal de negócio. Confirmado por chamada real: `GET .../ows?...
+    # &typeName=cemaden_dev:alertas_vigentes_siaden` — a mesma camada que
+    # https://mapainterativo.cemaden.gov.br usa para o próprio mapa público.
+    cemaden_alerts_base_url: str = "https://gsc.cemaden.gov.br/geoserver/cemaden_dev"
+    cemaden_http_timeout: float = 30.0
+    # O CEMADEN não manda uma data de expiração explícita, e o candidato óbvio
+    # (`vigencia`) também não serve: medido contra a fonte real, alertas ainda
+    # `status=1` ficaram mais de 8h sem `vigencia` atualizar — não dá para
+    # assumir um heartbeat frequente da fonte. `expires` é derivado do nosso
+    # próprio ciclo de ingestão, não de `vigencia` (ver
+    # app/providers/cemaden/alerts.py): 3 ciclos perdidos do scheduler antes
+    # de um alerta ainda ativo sumir do mapa — mesmo multiplicador de
+    # `_STALE_MULTIPLIER` em app/services/weather.py, aplicado por alerta em
+    # vez de por fonte inteira.
+    cemaden_alert_validity_buffer_seconds: int = 3 * 600
+
     # Liga o laço asyncio de atualização periódica (app/jobs/weather_scheduler.py)
     # no lifespan da API. Desligado em teste/CI por padrão via .env, para não
     # depender de rede externa ao rodar a suíte.

@@ -46,11 +46,44 @@ class WeatherStationCollection(CamelModel):
     features: list[WeatherStationFeature]
 
 
+class WeatherAlertCategory(str, enum.Enum):
+    """Classificação comum entre fontes — o frontend decide layout por isto,
+    não por `provider`. Hoje é 100% função da fonte (o INMET só emite
+    fenômeno meteorológico; o CEMADEN só emite risco geo-hidrológico), mas
+    fica no alerta, não só documentado em `provider`, porque é o dado que a
+    UI realmente usa (ver `services/weather.py::_category_for`).
+    """
+
+    METEOROLOGICAL = "meteorological"
+    GEO_HYDROLOGICAL = "geo_hydrological"
+
+
+class WeatherAlertSeverityLevel(str, enum.Enum):
+    """Tier visual comum — a mesma escala de 3 níveis que o frontend já usava
+    (`AlertSeverityTier` em `alertStyles.ts`), só que calculada aqui em vez de
+    adivinhada no cliente a partir de texto/cor por fonte. Ver
+    `services/weather.py::_severity_level_for`: cada provider tem seu próprio
+    vocabulário de `severity` (INMET: "Perigo"/"Grande Perigo"; CEMADEN:
+    "Alto"/"Muito Alto"), mas os dois caem nestes 4 valores.
+    """
+
+    POTENTIAL = "potential"
+    DANGER = "danger"
+    EXTREME = "extreme"
+    OTHER = "other"
+
+
 class WeatherAlertProperties(CamelModel):
     provider: str
+    category: WeatherAlertCategory
     event: str
     severity: str
+    severity_level: WeatherAlertSeverityLevel
     color: str | None = None
+    # Frase livre opcional da fonte além de `event` (ex.: "BLUMENAU/SC" do
+    # CEMADEN, onde `event` sozinho não diz o município). `None` para fontes
+    # onde `event`/`risks` já bastam — o INMET, hoje.
+    description: str | None = None
     onset: datetime
     expires: datetime
     affected_ibge_codes: list[str] = Field(default_factory=list)

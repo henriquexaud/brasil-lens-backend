@@ -156,7 +156,15 @@ class WeatherObservation(Base, TimestampMixin):
 
 
 class WeatherAlert(Base, TimestampMixin):
-    """Um alerta meteorológico georreferenciado (ex.: aviso de tempestade do INMET).
+    """Um alerta georreferenciado — aviso meteorológico (INMET) ou risco
+    geo-hidrológico (CEMADEN). Mesma tabela, mesmas colunas: as duas fontes já
+    produzem o mesmo `WeatherAlertRecord` (`app/providers/records.py`), então
+    não há necessidade de coluna condicional por proveniência. `category` e
+    `severity_level` — a classificação comum que o frontend consome — são
+    derivados de `provider`/`severity` em `services/weather.py`, não
+    persistidos aqui: hoje são 100% função de `provider`, guardá-los seria
+    duplicar dado sem necessidade concreta (mesmo raciocínio de
+    `docs/ARCHITECTURE.md` §10.4 contra especular estrutura sem fonte real).
 
     `polygon` é sempre gravado como MULTIPOLYGON, mesmo quando a fonte manda um
     único Polygon — mesma normalização (`ST_Multi`) que `territory_geometries`
@@ -167,8 +175,9 @@ class WeatherAlert(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
     provider: Mapped[WeatherProvider] = mapped_column(weather_provider_enum, nullable=False)
-    # Chave estável da fonte (para o INMET, `codigo` — sobrevive a uma
-    # atualização do mesmo aviso; ver app/providers/inmet/alerts.py).
+    # Chave estável da fonte (para o INMET, `codigo`; para o CEMADEN,
+    # `id_alerta` — sobrevive a uma atualização do mesmo alerta; ver
+    # app/providers/inmet/alerts.py e app/providers/cemaden/alerts.py).
     external_id: Mapped[str] = mapped_column(String(120), nullable=False)
 
     event: Mapped[str] = mapped_column(String(80), nullable=False)
@@ -177,6 +186,12 @@ class WeatherAlert(Base, TimestampMixin):
     # nunca substituída pela paleta do produto (é convenção de severidade da
     # própria fonte, não um dado sequencial/categórico nosso).
     color: Mapped[str | None] = mapped_column(String(16))
+    # Frase livre opcional além de `event` (ex.: "BLUMENAU/SC" do CEMADEN,
+    # onde `event` sozinho — "Movimentos de Massa" — não diz o município).
+    # Texto da fonte, verbatim, pela mesma razão de `color`: não é nosso papel
+    # re-capitalizar topônimo (ver app/providers/cemaden/alerts.py). NULL para
+    # fontes onde `event`/`risks` já bastam (o INMET, hoje).
+    description: Mapped[str | None] = mapped_column(String(200))
 
     onset: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
     expires: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)

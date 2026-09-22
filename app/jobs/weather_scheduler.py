@@ -22,7 +22,7 @@ from collections.abc import Awaitable, Callable
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.jobs import import_weather_inmet_alerts
+from app.jobs import import_weather_cemaden_alerts, import_weather_inmet_alerts
 
 logger = get_logger(__name__)
 
@@ -30,9 +30,12 @@ logger = get_logger(__name__)
 # `run_job`, só que aqui invocada direto (sem o wrapper que faz
 # `asyncio.run`/`SystemExit`/`dispose_engine`, que fecharia a engine da API).
 # Condições atuais vêm da Open-Meteo sob demanda e com cache.
-# Os jobs legados de estações continuam disponíveis pela CLI.
+# Os jobs legados de estações continuam disponíveis pela CLI. INMET e CEMADEN
+# rodam no mesmo intervalo por simplicidade — nada hoje pede cadências
+# diferentes; se algum dia pedir, é só passar `interval` por job aqui.
 _JOBS: tuple[tuple[str, Callable[[], Awaitable[int]]], ...] = (
     ("inmet_alerts", import_weather_inmet_alerts.main),
+    ("cemaden_alerts", import_weather_cemaden_alerts.main),
 )
 
 _tasks: list[asyncio.Task[None]] = []

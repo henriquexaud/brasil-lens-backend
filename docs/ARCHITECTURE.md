@@ -978,11 +978,37 @@ o usuário abre as opções ou habilita a camada. A busca de territórios é fei
 backend, sobre nomes normalizados na ingestão, e só consulta a partir de duas
 letras. Os detalhes usam importação dinâmica para não ampliar o bundle inicial.
 
-Avisos oficiais continuam ingeridos pelo INMET em laço independente. As
-camadas de avisos e temperaturas não interceptam os eventos das divisas. Os
-job de estações INMET permanece como CLI legada, fora da atualização automática
-e do catálogo de fontes disponíveis, até ter leituras verificáveis. O provider
-CEMADEN, sem endpoint público confirmado, foi removido.
+Alertas oficiais são ingeridos por dois laços independentes do scheduler: o
+INMET (fenômeno meteorológico — chuva intensa, tempestade, vento, baixa
+umidade, onda de calor) e o CEMADEN (risco geo-hidrológico associado —
+inundação, enxurrada, alagamento, deslizamento), complementares por desenho.
+Os dois produzem o mesmo `WeatherAlertRecord` (`app/providers/records.py`) e
+gravam na mesma tabela `weather_alerts`, sem se fundir: um aviso do INMET e um
+risco do CEMADEN na mesma área continuam dois alertas distintos em
+`/weather/alerts`. `category` e `severity_level` — calculados a partir do
+vocabulário de cada fonte em `services/weather.py`, nunca persistidos, porque
+hoje são função só de `provider` — são a camada comum que o frontend consome
+sem conhecer o formato de nenhuma das duas fontes; a UI mantém uma única
+camada de **Alertas**, com a origem visível dentro de cada item, não como
+controle por instituição.
+
+Nenhuma das duas fontes documenta uma API pública formalmente — o contrato do
+INMET (`apiprevmet3.inmet.gov.br`) e o do CEMADEN
+(`app/providers/cemaden/alerts.py`) foram confirmados por chamada real, não
+por especificação. A fonte do CEMADEN é o GeoServer WFS que também alimenta o
+Mapa Interativo público do CEMADEN (protocolo OGC padrão, autodescritivo via
+`DescribeFeatureType` — a mesma técnica já usada para o INPE/BDQueimadas),
+preferida a um endpoint JSON ad-hoc justamente por reduzir esse risco mesmo
+sem documentação de negócio. Uma diferença real de disponibilidade fica
+isolada no provider, não vaza para o resto do backend: o CEMADEN não manda
+data de expiração explícita, só um carimbo de "última confirmação"
+(`vigencia`) reemitido enquanto o risco persiste — a expiração gravada é
+`vigencia` mais um buffer configurável (padrão 4 h), para que um ciclo do
+scheduler perdido não apague um risco real do mapa por engano.
+
+As camadas de alertas e temperaturas não interceptam os eventos das divisas.
+O job de estações INMET permanece como CLI legada, fora da atualização
+automática e do catálogo de fontes disponíveis, até ter leituras verificáveis.
 
 ### Focos INPE: cobertura completa e detalhe sob demanda
 
