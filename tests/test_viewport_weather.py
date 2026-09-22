@@ -80,3 +80,16 @@ async def test_known_readings_are_reused_across_zoom_levels(monkeypatch) -> None
     await service.get_viewport_current(AsyncMock(), (-47.2, -23.6, -45.9, -22.9), 10)
     fetched = [location[1] for call in fetch.await_args_list for location in call.args[1]]
     assert sorted(fetched) == sorted(name for _, name, _, _ in POINTS)
+
+
+async def test_dense_area_measures_on_a_coarser_grid(monkeypatch) -> None:
+    fetch = fetch_mock()
+    monkeypatch.setattr(service, "fetch_locations", fetch)
+    monkeypatch.setattr(service, "MAX_MEASURED_PER_VIEW", 1)
+    response = await service.get_viewport_current(
+        AsyncMock(), (-47.2, -23.6, -45.9, -22.9), 10, parent="35"
+    )
+    # Seis municípios no zoom 10 seriam todos medidos; com o teto, um por célula grande.
+    assert len(fetch.await_args.args[1]) == 1
+    assert sum(not city.is_inferred for city in response.cities) == 1
+    assert len(response.cities) == len(POINTS)

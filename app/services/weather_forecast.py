@@ -527,7 +527,10 @@ async def get_state_weather(session: AsyncSession, parent: str) -> WeatherCurren
     return response
 
 
-_CELL_SIZES = (1.0, 0.5, 0.25)
+_CELL_SIZES = (1.0, 0.5, 0.25, 0.1)
+# Teto de medições por área visível: acima dele a grade engrossa, então quanto
+# mais denso o recorte, menos municípios medidos (os demais são estimados).
+MAX_MEASURED_PER_VIEW = 80
 
 
 def _cell_size(zoom: int, bbox: tuple[float, float, float, float]) -> float:
@@ -600,6 +603,11 @@ async def get_viewport_current(
     area = [position.get(code, (code, name, uf, lat, lon)) for code, name, uf, lat, lon in visible]
 
     size = _cell_size(zoom, bbox)
+    # Área densa: a grade engrossa até caber no teto de medições.
+    for coarser in (value for value in sorted(_CELL_SIZES) if value > size):
+        if len({_cell(p[3], p[4], size) for p in area} if size else area) <= MAX_MEASURED_PER_VIEW:
+            break
+        size = coarser
     if size:
         chosen: dict[str, Point] = {}
         for point in area:
