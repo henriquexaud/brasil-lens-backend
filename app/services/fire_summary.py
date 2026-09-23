@@ -28,36 +28,51 @@ _cache: TTLCache[FireSummary] = TTLCache(7200, 32)
 _failures: TTLCache[bool] = TTLCache(60, 32)
 _locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 PAGE_SIZE = 10000
+# Páginas pedidas ao mesmo tempo. Na seca o Brasil passa de 40 mil focos em
+# 24 h: em fila, cada página esperava a anterior; poucas por vez não pressionam
+# o serviço público.
+PAGE_CONCURRENCY = 4
 
 
 async def _fetch_rows(cql: str, total: int) -> list[dict[str, str]]:
+    limit = asyncio.Semaphore(PAGE_CONCURRENCY)
     async with httpx.AsyncClient(timeout=settings.inpe_queimadas_http_timeout) as client:
-        rows: list[dict[str, str]] = []
-        # Sequencial: limita pressão no serviço público e memória, sem truncar páginas.
-        while len(rows) < total:
-            response = await client.get(
-                settings.inpe_queimadas_wfs_url,
-                params={
-                    "service": "WFS",
-                    "version": "2.0.0",
-                    "request": "GetFeature",
-                    "typeNames": "bdqueimadas:focos",
-                    "outputFormat": "csv",
-                    "propertyName": "id_foco_bdq,id_1,id_2,data_hora_gmt",
-                    "cql_filter": cql,
-                    "count": min(PAGE_SIZE, total - len(rows)),
-                    "startIndex": len(rows),
-                    "sortBy": "data_hora_gmt D,id_foco_bdq D",
-                },
-            )
+
+        async def page(start: int) -> list[dict[str, str]]:
+            async with limit:
+                response = await client.get(
+                    settings.inpe_queimadas_wfs_url,
+                    params={
+                        "service": "WFS",
+                        "version": "2.0.0",
+                        "request": "GetFeature",
+                        "typeNames": "bdqueimadas:focos",
+                        "outputFormat": "csv",
+                        "propertyName": "id_foco_bdq,id_1,id_2,data_hora_gmt",
+                        "cql_filter": cql,
+                        "count": min(PAGE_SIZE, total - start),
+                        "startIndex": start,
+                        "sortBy": "data_hora_gmt D,id_foco_bdq D",
+                    },
+                )
             response.raise_for_status()
-            page = list(csv.DictReader(io.StringIO(response.text)))
-            if not page or "id_foco_bdq" not in page[0]:
+            rows = list(csv.DictReader(io.StringIO(response.text)))
+            if not rows or "id_foco_bdq" not in rows[0]:
                 raise ValueError("Página de focos incompleta")
-            rows.extend(page)
-        if len(rows) != total or len({row["id_foco_bdq"] for row in rows}) != total:
-            raise ValueError("Contagem de focos mudou durante a consulta; tente novamente")
-        return rows
+            return rows
+
+        tasks = [asyncio.create_task(page(start)) for start in range(0, total, PAGE_SIZE)]
+        try:
+            pages = await asyncio.gather(*tasks)
+        finally:
+            # Uma página falhou: as que ainda esperam a vez não vão à fonte.
+            for task in tasks:
+                task.cancel()
+    rows = [row for page_rows in pages for row in page_rows]
+    # Páginas truncadas ou deslocadas (a fonte mudou no meio) não passam.
+    if len(rows) != total or len({row["id_foco_bdq"] for row in rows}) != total:
+        raise ValueError("Contagem de focos mudou durante a consulta; tente novamente")
+    return rows
 
 
 def aggregate(

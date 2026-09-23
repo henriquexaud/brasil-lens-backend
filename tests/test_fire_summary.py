@@ -1,5 +1,6 @@
 """Densidade territorial, janelas, completude de páginas e ausência de área."""
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -80,6 +81,37 @@ async def test_all_csv_pages_are_read_and_duplicate_or_incomplete_pages_fail(mon
     route.mock(return_value=httpx.Response(200, text=header))
     with pytest.raises(ValueError, match="incompleta"):
         await service._fetch_rows("id_0=33", 3)
+
+
+@respx.mock
+async def test_pages_come_together_a_few_at_a_time_and_a_failure_stops_the_queue(monkeypatch):
+    monkeypatch.setattr(service, "PAGE_SIZE", 1)
+    monkeypatch.setattr(service, "PAGE_CONCURRENCY", 2)
+    header = "id_foco_bdq,id_2,longitude,latitude,data_hora_gmt\n"
+    in_flight = peak = 0
+
+    async def respond(request):
+        nonlocal in_flight, peak
+        start = request.url.params["startIndex"]
+        if start == "0" and fail_first:
+            return httpx.Response(500)
+        in_flight += 1
+        peak = max(peak, in_flight)
+        await asyncio.sleep(0.02)
+        in_flight -= 1
+        return httpx.Response(200, text=f"{header}{start},11,-50,-10,2026-09-20T00:00:00\n")
+
+    fail_first = False
+    route = respx.get(settings.inpe_queimadas_wfs_url).mock(side_effect=respond)
+    rows = await service._fetch_rows("id_0=33", 5)
+    assert [row["id_foco_bdq"] for row in rows] == ["0", "1", "2", "3", "4"], "na ordem da fonte"
+    assert peak == 2, "páginas juntas, mas no máximo PAGE_CONCURRENCY por vez"
+
+    fail_first = True
+    before = route.call_count
+    with pytest.raises(httpx.HTTPStatusError):
+        await service._fetch_rows("id_0=33", 5)
+    assert route.call_count - before < 5, "as páginas que esperavam a vez não vão à fonte"
 
 
 @pytest.mark.parametrize("value", ["0,0,1", "0,0,NaN,2", "2,1,0,0", "-200,-20,0,20"])

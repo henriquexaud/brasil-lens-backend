@@ -160,8 +160,9 @@ class WeatherCity(CamelModel):
     precipitation_24h_mm: FiniteFloat | None = Field(default=None, alias="precipitation24hMm")
     # Chovendo no intervalo mais recente (precipitação ou código de chuva).
     raining_now: bool = False
-    # Visão do Brasil: quantos pontos do estado compõem a chuva e quantos têm chuva agora.
-    rain_points: int | None = None
+    # Visão do Brasil: quantos pontos medidos compõem a média da UF e quantos
+    # têm chuva agora.
+    sample_points: int | None = None
     raining_points: int | None = None
     forecast: list[WeatherForecastDay]
     is_inferred: bool = False

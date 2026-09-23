@@ -879,8 +879,11 @@ negativas são normalizadas para `null`; risco de fogo permanece um índice, nã
 porcentagem. FRP é potência radiativa em MW, não área queimada.
 
 - `GET /api/v1/fire-hotspots/summary`: mesmos filtros e `at=metadata.windowEnd`.
-  Lê o WFS em CSV paginado, valida contagem e IDs únicos e devolve estatísticas
-  de estados e municípios. `density = count × 1000 / areaKm2`.
+  Lê o WFS em CSV paginado (páginas de 10 mil, até quatro ao mesmo tempo; uma
+  falha cancela as que esperam a vez), valida contagem e IDs únicos e devolve
+  estatísticas de estados e municípios. `density = count × 1000 / areaKm2`.
+  As áreas, a consulta mais lenta (~2 s), são aquecidas em segundo plano ao
+  subir a API.
   A área de cada estado/município é geodésica, calculada no PostGIS sobre sua malha **canônica** IBGE (não
   sobre o LOD simplificado); `areaSource` explicita essa metodologia. Área ausente
   gera densidade nula. Contagens de 24h e do período, última detecção e registros
@@ -908,13 +911,21 @@ com período anterior sem uma segunda janela validada.
   `nextOffset=null` indica fim; limite máximo de 40 geometrias por resposta.
   A consulta preserva as coordenadas da ingestão, sem simplificar nem recortar
   os polígonos. A chave de cache distingue recorte, código e página.
-- `GET /api/v1/weather/capitals?offset=0&limit=6`: condições atuais das capitais,
-  primeiro com cobertura das cinco regiões, depois completando as 27 UFs.
-  Selecionar uma UF consulta apenas sua capital e reutiliza o cache do lote.
-- `GET /api/v1/weather/states`: chuva de cada UF para o mapa do Brasil — média do
-  acumulado de 24 h em quatro pontos dispersos (a capital e os três seguintes da
-  amostra do estado, reaproveitados ao abrir a UF), com `rainingNow` e quantos
-  pontos têm chuva agora (`rainingPoints`/`rainPoints`).
+- `GET /api/v1/weather/current?forecast=false`: as 27 capitais numa consulta, a
+  primeira etapa do mapa do Brasil. Selecionar uma UF consulta apenas sua
+  capital e reutiliza a mesma leitura.
+- `GET /api/v1/weather/states`: a segunda etapa — clima e chuva de cada UF como a
+  média de pontos espalhados pelo território, um a cada ~60 mil km² (de 2 a 8,
+  109 no país). São os primeiros da amostra de dispersão do estado (a capital e
+  os mais afastados dela), reaproveitados ao abrir a UF; as capitais já lidas
+  não voltam à fonte. Cada ponto pesa a área que representa: cada município soma
+  a sua ao ponto medido mais próximo (polígonos de Thiessen sobre a malha
+  canônica). Temperatura, umidade, vento e chuva são médias; o céu é o que cobre
+  a maior área; chance de chuva e `rainingNow` valem se valem para algum ponto.
+  `samplePoints` e `rainingPoints` dizem quantos pontos compõem a média e
+  quantos têm chuva agora. Sem as leituras novas, a UF volta a ser a capital,
+  marcada como dado anterior. Amostra e pesos dependem só da malha e são
+  calculados uma vez por processo.
 - `GET /api/v1/weather/viewport?bbox=...&zoom=8&parent=35`: clima atual de todos os
   municípios que intersectam a área, do centro para as bordas. Mede um município por
   célula da grade (0,5° no zoom 8, 0,25° no 9, todos a partir do 10) e estima os demais;

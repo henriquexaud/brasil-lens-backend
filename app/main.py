@@ -30,15 +30,25 @@ from app.core.logging import configure_logging, get_logger
 from app.core.redis_cache import close as close_redis
 from app.db.session import SessionFactory, dispose_engine
 from app.jobs import weather_scheduler
+from app.repositories.boundaries import municipality_areas, state_areas
 from app.services import hydrography
 
 configure_logging()
 logger = get_logger(__name__)
 
 
-async def _warm_hydrography() -> None:
+async def _warm_up() -> None:
+    """Consultas lentas de dado estático, antes do primeiro pedido que as usaria."""
     async with SessionFactory() as session:
-        await hydrography.warm_up(session)
+        try:
+            # Área geodésica da malha canônica (~2 s): densidade de focos e peso
+            # de cada ponto na média do clima de cada UF no mapa do Brasil.
+            await municipality_areas(session)
+            await state_areas(session)
+        except Exception:
+            logger.warning("api.warm_up_areas_failed", exc_info=True)
+        if settings.hydrography_warmup_enabled:
+            await hydrography.warm_up(session)
 
 
 @asynccontextmanager
@@ -48,14 +58,11 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     # app/jobs/weather_scheduler.py sobre por que é um laço em processo e não
     # um cron externo.
     weather_scheduler.start()
-    warm_up = (
-        asyncio.create_task(_warm_hydrography()) if settings.hydrography_warmup_enabled else None
-    )
+    warm_up = asyncio.create_task(_warm_up())
     yield
-    if warm_up is not None:
-        warm_up.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await warm_up
+    warm_up.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await warm_up
     await weather_scheduler.stop()
     await dispose_engine()
     await close_redis()

@@ -24,11 +24,10 @@ from app.schemas.weather import (
 from app.services import weather as weather_service
 from app.services.viewport import parse_bbox
 from app.services.weather_forecast import (
-    get_capitals_current,
     get_current,
     get_municipalities_current,
     get_state_weather,
-    get_states_rain,
+    get_states_weather,
     get_territory_current,
     get_viewport_current,
 )
@@ -149,20 +148,12 @@ async def viewport_boundaries(
     )
 
 
-@router.get("/capitals", response_model=WeatherCurrentResponse)
-async def capitals_weather(
-    offset: Annotated[int, Query(ge=0, le=27)] = 0,
-    limit: Annotated[int, Query(ge=1, le=9)] = 6,
-) -> WeatherCurrentResponse:
-    return await get_capitals_current(offset, limit)
-
-
 @router.get(
     "/states",
     response_model=WeatherCurrentResponse,
-    summary="Chuva de cada UF (média de pontos dispersos) para o mapa do Brasil",
+    summary="Clima de cada UF para o mapa do Brasil: média de pontos ponderada pela área",
 )
-async def states_rain(
+async def states_weather(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> WeatherCurrentResponse:
-    return await get_states_rain(session)
+    return await get_states_weather(session)

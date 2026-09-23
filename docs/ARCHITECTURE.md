@@ -943,7 +943,12 @@ O contexto climático reutiliza `/map` sem indicador, conservando as divisas,
 o recorte por UF, a busca e a seleção. Condições atuais não são médias dos
 polígonos: `/weather/current?territory=<IBGE>` usa a capital para estados e
 um ponto interno da malha para municípios. A interface explicita essa referência.
-Sem território selecionado, uma consulta em lote fornece as 27 capitais.
+Sem território selecionado, uma consulta em lote fornece as 27 capitais — a
+primeira etapa do mapa do Brasil. A segunda, `/weather/states`, pinta cada UF
+pela média de pontos espalhados pelo território (um a cada ~60 mil km², de 2 a
+8), ponderada pela área que cada ponto representa (Thiessen sobre a malha
+municipal); os pontos são o começo da amostra do estado, então abrir a UF os
+reaproveita.
 
 A Open-Meteo é consultada sob demanda no backend. Essa rota é uma exceção à
 leitura exclusivamente offline dos indicadores IBGE. A fonte conta cada
@@ -1038,7 +1043,8 @@ selecionar uma cidade dentro dele não refaz a camada inteira.
 
 
 A agregação verifica todas as páginas CSV, unicidade dos IDs e a contagem após a
-leitura. Ela compartilha o intervalo dos metadados, guarda o resultado por intervalo
+leitura. As páginas saem juntas, até quatro por vez: na seca o Brasil passa de
+40 mil focos em 24 h, e em fila cada página esperava a anterior. Ela compartilha o intervalo dos metadados, guarda o resultado por intervalo
 e evita consultas concorrentes iguais. Municípios sem área canônica não recebem
 uma densidade fictícia. A consulta espacial das malhas usa o índice PostGIS e o LOD
 detail no zoom próximo; nomes e coordenadas brutas de dezenas de milhares de focos não chegam ao

@@ -5,8 +5,8 @@ gasta 20 da cota. Por isso a unidade de cache é a leitura de cada município,
 não o lote: capitais, amostra do estado, lotes, área visível e seleção resolvem
 os mesmos pontos em memória → Redis → fonte, e só o que falta vai à
 Open-Meteo, numa chamada. A capital lida no mapa do Brasil é a mesma leitura
-do município quando ele é selecionado; a amostra do estado é reaproveitada
-pelo zoom.
+do município quando ele é selecionado; a média de cada UF no Brasil usa o
+começo da amostra do estado, e a amostra é reaproveitada pelo zoom.
 
 Frescor segue a cadência da fonte, cujas condições atuais mudam a cada 15
 minutos: a cidade selecionada vale até o próximo intervalo; as camadas do mapa
@@ -25,7 +25,7 @@ import math
 import time
 from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
-from typing import Literal
+from typing import Literal, NamedTuple
 
 import httpx
 from pydantic import BaseModel
@@ -45,6 +45,7 @@ from app.models import TerritoryLevel
 from app.providers.open_meteo import CAPITALS, fetch_locations
 from app.repositories import territories
 from app.repositories import viewport as viewport_repo
+from app.repositories.boundaries import municipality_areas
 from app.schemas.weather import (
     WeatherCity,
     WeatherCurrentResponse,
@@ -69,9 +70,13 @@ READING_TTL_SECONDS = int(MAX_FALLBACK_AGE.total_seconds())
 READINGS_NAMESPACE = "weather-reading"
 # Municípios medidos de fato por estado; os demais são interpolados (IDW).
 STATE_SAMPLE_SIZE = 20
-# Chuva no mapa do Brasil: os primeiros pontos da mesma amostra (a capital é o
-# primeiro), reaproveitados quando a UF é aberta.
-STATE_RAIN_POINTS = 4
+# Mapa do Brasil: cada UF é medida em pontos espalhados pelo território, um a
+# cada ~60 mil km², de 2 a 8 — o Amazonas pede mais leituras que Sergipe. São
+# os primeiros da mesma amostra (a capital é o primeiro), reaproveitados
+# quando a UF é aberta.
+NATIONAL_KM2_PER_POINT = 60_000
+NATIONAL_MIN_POINTS = 2
+NATIONAL_MAX_POINTS = 8
 STATE_RESPONSE_SECONDS = 60
 # Coordenadas por chamada HTTP à fonte: a URL cresce com cada uma.
 FETCH_CHUNK = 100
@@ -114,12 +119,23 @@ class WeatherReading(BaseModel):
     city: WeatherCity
 
 
+class _NationalSample(NamedTuple):
+    """Pontos medidos de uma UF no mapa do Brasil e a área (km²) de cada um."""
+
+    abbreviation: str
+    name: str
+    points: list[Point]
+    weights: list[float]
+
+
 _readings: TTLCache[WeatherReading] = TTLCache(READING_TTL_SECONDS, 12_000)
 _state_responses: TTLCache[WeatherCurrentResponse] = TTLCache(STATE_RESPONSE_SECONDS, 64)
 # Consulta em curso por ponto: quem pede o mesmo município espera por ela.
 _inflight: dict[tuple[Variant, str], asyncio.Task[dict[str, WeatherReading]]] = {}
 # Célula → município medido, por (UF, tamanho da célula).
 _representatives: dict[tuple[str, float], dict[tuple[int, int], str]] = {}
+# Amostra e pesos de cada UF no mapa do Brasil, por sigla: dependem só da malha.
+_national_samples: dict[str, _NationalSample] = {}
 # Falha da fonte pausa as consultas por um minuto; ver app/core/cooldown.py.
 open_meteo_cooldown = SourceCooldown("open_meteo", 60)
 # Cota da fonte esgotada (HTTP 429): enquanto vale, nenhuma consulta sai. É
@@ -367,69 +383,135 @@ async def _capitals(points: list[Point], variant: Variant) -> WeatherCurrentResp
 
 
 async def get_current(*, include_forecast: bool = True) -> WeatherCurrentResponse:
-    """As 27 capitais de uma vez."""
+    """As 27 capitais de uma vez: a primeira etapa do mapa do Brasil."""
     points = [_capital_point(capital) for capital in CAPITALS]
     return await _capitals(points, "forecast" if include_forecast else "current")
 
 
-async def get_capitals_current(offset: int, limit: int) -> WeatherCurrentResponse:
-    # Primeiro lote cobre as cinco regiões; os demais completam as 27 UFs.
-    first = ("SP", "AM", "BA", "DF", "RS", "PE")
-    ordered = sorted(CAPITALS, key=lambda city: first.index(city[0]) if city[0] in first else 6)
-    points = [_capital_point(capital) for capital in ordered[offset : offset + limit]]
-    if not points:
-        return WeatherCurrentResponse(fetched_at=datetime.now(UTC), cities=[])
-    result = await _capitals(points, "current")
-    result.next_offset = offset + limit if offset + limit < len(ordered) else None
-    return result
+def _sample_size(area_km2: float, municipalities: int) -> int:
+    """Pontos medidos de uma UF no mapa do Brasil, pela área do território."""
+    wanted = round(area_km2 / NATIONAL_KM2_PER_POINT)
+    return min(municipalities, max(NATIONAL_MIN_POINTS, min(NATIONAL_MAX_POINTS, wanted)))
 
 
-async def get_states_rain(session: AsyncSession) -> WeatherCurrentResponse:
-    """Chuva de cada UF para o mapa do Brasil: média de pontos dispersos, não só a capital.
+def _area_weights(points: list[Point], sample: list[Point], area: dict[str, float]) -> list[float]:
+    """Área (km²) que cada ponto medido representa: cada município soma a sua ao
+    ponto medido mais próximo — os polígonos de Thiessen, o método clássico da
+    chuva média de uma região, aqui sobre a malha municipal."""
+    cos_lat = math.cos(math.radians(sum(point[3] for point in points) / len(points)))
+    weights = [0.0] * len(sample)
+    for code, _, _, lat, lon in points:
+        distances = [(s[3] - lat) ** 2 + ((s[4] - lon) * cos_lat) ** 2 for s in sample]
+        weights[distances.index(min(distances))] += area.get(code, 0.0)
+    return weights
 
-    Chuva é local; a capital sozinha diria "sem chuva" para um estado inteiro.
-    Cada UF usa os primeiros pontos da sua amostra de dispersão — a capital,
-    já lida pelas capitais, e mais três —, que o clima do estado reaproveita.
-    """
-    states = await territories.list_territories(session, level=TerritoryLevel.STATE, limit=100)
-    groups: list[tuple[str, str, list[Point]]] = []
-    for state in states:
-        abbreviation = state.abbreviation or ""
-        rows = await territories.list_weather_points(session, state.ibge_code, 0, STATE_RAIN_POINTS)
-        points = [(code, name, abbreviation, lat, lon) for code, name, lat, lon in rows]
-        if points and abbreviation in CAPITAL_IBGE_CODES:
-            groups.append((abbreviation, state.name, points))
-    readings, outdated = await _resolve(
-        [point for _, _, points in groups for point in points], MAP_FRESHNESS
-    )
-    cities = []
-    for abbreviation, name, points in groups:
-        measured = [readings[point[0]].city for point in points if point[0] in readings]
-        if not measured:
-            continue
-        rain = [c.precipitation_24h_mm for c in measured if c.precipitation_24h_mm is not None]
-        today = [c.precipitation_sum_mm for c in measured if c.precipitation_sum_mm is not None]
-        chances = [
-            c.precipitation_probability_pct
-            for c in measured
-            if c.precipitation_probability_pct is not None
-        ]
-        cities.append(
-            measured[0].model_copy(
-                update={
-                    "id": abbreviation,
-                    "name": name,
-                    "precipitation_24h_mm": round(sum(rain) / len(rain), 1) if rain else None,
-                    "precipitation_sum_mm": round(sum(today) / len(today), 1) if today else None,
-                    "precipitation_mm": max((c.precipitation_mm or 0) for c in measured),
-                    "precipitation_probability_pct": max(chances) if chances else None,
-                    "raining_now": any(c.raining_now for c in measured),
-                    "rain_points": len(measured),
-                    "raining_points": sum(c.raining_now for c in measured),
-                    "is_inferred": False,
-                }
+
+async def _national_sample(session: AsyncSession) -> list[_NationalSample]:
+    """Pontos e pesos de cada UF, calculados uma vez: a malha não muda entre consultas."""
+    if not _national_samples:
+        area = {
+            row["ibge_code"]: row["area_km2"] or 0.0 for row in await municipality_areas(session)
+        }
+        states = await territories.list_territories(session, level=TerritoryLevel.STATE, limit=100)
+        samples: dict[str, _NationalSample] = {}
+        for state in states:
+            abbreviation = state.abbreviation or ""
+            rows = await territories.list_weather_points(session, state.ibge_code, 0, 10_000)
+            points = [(code, name, abbreviation, lat, lon) for code, name, lat, lon in rows]
+            if not points or abbreviation not in CAPITAL_IBGE_CODES:
+                continue
+            size = _sample_size(sum(area.get(point[0], 0.0) for point in points), len(points))
+            sample = points[:size]
+            samples[abbreviation] = _NationalSample(
+                abbreviation, state.name, sample, _area_weights(points, sample, area)
             )
-        )
+        # De uma vez: uma consulta concorrente nunca vê só parte das UFs.
+        _national_samples.update(samples)
+    return list(_national_samples.values())
+
+
+def _weighted_mean(pairs: list[tuple[float, float]]) -> float | None:
+    """Média ponderada; sem área conhecida (peso zero), a média simples."""
+    if not pairs:
+        return None
+    total = sum(weight for weight, _ in pairs)
+    if total <= 0:
+        return round(sum(value for _, value in pairs) / len(pairs), 1)
+    return round(sum(weight * value for weight, value in pairs) / total, 1)
+
+
+def _state_average(
+    sample: _NationalSample, readings: dict[str, WeatherReading]
+) -> WeatherCity | None:
+    """A UF como a média dos seus pontos, cada um pesando a área que representa.
+
+    Temperatura, umidade, vento e chuva acumulada são médias; o céu é o que
+    cobre a maior área; chance de chuva e "chovendo agora" valem para a UF se
+    valem para algum ponto dela. Um ponto sem leitura sai da conta e os demais
+    dividem o peso: sem nenhum além da capital, a UF volta a ser a capital.
+    """
+    measured = [
+        (weight, readings[point[0]].city)
+        for point, weight in zip(sample.points, sample.weights, strict=True)
+        if point[0] in readings
+    ]
+    if not measured:
+        return None
+    cities = [city for _, city in measured]
+
+    def mean(field: str) -> float | None:
+        values = [(weight, getattr(city, field)) for weight, city in measured]
+        return _weighted_mean([(weight, value) for weight, value in values if value is not None])
+
+    # Área sob cada céu; no empate, o da capital (o primeiro ponto).
+    sky: dict[int, float] = {}
+    for weight, city in measured:
+        if city.weather_code is not None:
+            sky[city.weather_code] = sky.get(city.weather_code, 0.0) + weight
+    chances = [
+        city.precipitation_probability_pct
+        for city in cities
+        if city.precipitation_probability_pct is not None
+    ]
+    # A pílula continua na capital, onde a primeira etapa (só as capitais) a pôs.
+    capital = readings.get(CAPITAL_IBGE_CODES[sample.abbreviation])
+    return (capital.city if capital else cities[0]).model_copy(
+        update={
+            "id": sample.abbreviation,
+            "name": sample.name,
+            # Tão recente quanto o ponto mais antigo.
+            "observed_at": min(city.observed_at for city in cities),
+            "temperature_c": mean("temperature_c"),
+            "apparent_temperature_c": mean("apparent_temperature_c"),
+            "humidity_pct": mean("humidity_pct"),
+            "wind_speed_kmh": mean("wind_speed_kmh"),
+            "weather_code": max(sky, key=sky.__getitem__) if sky else None,
+            "precipitation_24h_mm": mean("precipitation_24h_mm"),
+            "precipitation_sum_mm": mean("precipitation_sum_mm"),
+            "precipitation_mm": max((city.precipitation_mm or 0) for city in cities),
+            "precipitation_probability_pct": max(chances) if chances else None,
+            "raining_now": any(city.raining_now for city in cities),
+            "sample_points": len(cities),
+            "raining_points": sum(city.raining_now for city in cities),
+            "forecast": [],
+            "is_inferred": False,
+        }
+    )
+
+
+async def get_states_weather(session: AsyncSession) -> WeatherCurrentResponse:
+    """Cada UF no mapa do Brasil: a média dos seus pontos, ponderada pela área.
+
+    A capital sozinha daria a todo o Amazonas o clima de Manaus, e chuva é
+    local: um ponto seco diria "sem chuva" para o estado inteiro. Os pontos são
+    os primeiros da amostra de dispersão da UF — a capital, já lida na primeira
+    etapa do mapa, e os mais afastados dela —, que o clima do estado reaproveita.
+    """
+    samples = await _national_sample(session)
+    readings, outdated = await _resolve(
+        [point for sample in samples for point in sample.points], MAP_FRESHNESS
+    )
+    cities = [city for sample in samples if (city := _state_average(sample, readings))]
     return _response(cities, readings.values(), outdated)
 
 
@@ -638,6 +720,7 @@ def reset_state() -> None:
     _readings.clear()
     _state_responses.clear()
     _representatives.clear()
+    _national_samples.clear()
     _inflight.clear()
     open_meteo_cooldown.reset()
     _rate_limited_until = 0.0
