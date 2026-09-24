@@ -35,6 +35,9 @@ logger = get_logger(__name__)
 
 JOB_NAME = "import_territories"
 
+# 7 binds por linha; o asyncpg aceita no máximo 32767 parâmetros por consulta.
+UPSERT_BATCH_SIZE = 4000
+
 
 async def _upsert_level(
     session: AsyncSession,
@@ -86,20 +89,21 @@ async def _upsert_level(
     if not payload:
         return 0
 
-    statement = insert(Territory).values(payload)
-    statement = statement.on_conflict_do_update(
-        index_elements=[Territory.ibge_code],
-        set_={
-            "name": statement.excluded.name,
-            "level": statement.excluded.level,
-            "abbreviation": statement.excluded.abbreviation,
-            "parent_id": statement.excluded.parent_id,
-            "normalized_name": statement.excluded.normalized_name,
-            "normalized_abbreviation": statement.excluded.normalized_abbreviation,
-            "updated_at": datetime.now(UTC),
-        },
-    )
-    await session.execute(statement)
+    for start in range(0, len(payload), UPSERT_BATCH_SIZE):
+        statement = insert(Territory).values(payload[start : start + UPSERT_BATCH_SIZE])
+        statement = statement.on_conflict_do_update(
+            index_elements=[Territory.ibge_code],
+            set_={
+                "name": statement.excluded.name,
+                "level": statement.excluded.level,
+                "abbreviation": statement.excluded.abbreviation,
+                "parent_id": statement.excluded.parent_id,
+                "normalized_name": statement.excluded.normalized_name,
+                "normalized_abbreviation": statement.excluded.normalized_abbreviation,
+                "updated_at": datetime.now(UTC),
+            },
+        )
+        await session.execute(statement)
     await session.commit()
     return len(payload)
 

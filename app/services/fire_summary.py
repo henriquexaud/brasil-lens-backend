@@ -139,6 +139,8 @@ async def get_summary(
         hours=2
     ):
         raise InvalidParameterError("Atualize a camada antes de consultar o resumo.", "at")
+    # O filtro WFS trunca para segundos; sem isto a validação de `aggregate` diverge da fonte.
+    at = at.replace(microsecond=0)
     scope = await _scope_filter(session, level, parent)
     key = f"{scope}:{hours}:{at.isoformat()}"
     lock = _locks.setdefault(key, asyncio.Lock())

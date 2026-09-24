@@ -58,9 +58,15 @@ _UPSERT_ALERTS_SQL = text(
            dataset_id           = EXCLUDED.dataset_id,
            ingestion_run_id     = EXCLUDED.ingestion_run_id,
            updated_at           = now()
-     WHERE target.expires     IS DISTINCT FROM EXCLUDED.expires
-        OR target.severity    IS DISTINCT FROM EXCLUDED.severity
-        OR target.description IS DISTINCT FROM EXCLUDED.description
+     WHERE target.expires             IS DISTINCT FROM EXCLUDED.expires
+        OR target.severity            IS DISTINCT FROM EXCLUDED.severity
+        OR target.description         IS DISTINCT FROM EXCLUDED.description
+        OR target.event               IS DISTINCT FROM EXCLUDED.event
+        OR target.color               IS DISTINCT FROM EXCLUDED.color
+        OR target.onset               IS DISTINCT FROM EXCLUDED.onset
+        OR target.affected_ibge_codes IS DISTINCT FROM EXCLUDED.affected_ibge_codes
+        OR target.risks               IS DISTINCT FROM EXCLUDED.risks
+        OR target.instructions        IS DISTINCT FROM EXCLUDED.instructions
         OR NOT ST_Equals(target.polygon, EXCLUDED.polygon)
     """
 )

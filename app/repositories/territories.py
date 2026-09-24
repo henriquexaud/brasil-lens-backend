@@ -97,7 +97,11 @@ def _search_terms(search: str) -> tuple[str, ColumnElement[Any], ColumnElement[A
 def _search_filter(search: str) -> ColumnElement[bool]:
     """Casa o termo no nome, a sigla exata ou o início da sigla."""
     clean, name_col, abbr_col = _search_terms(search)
-    return or_(name_col.contains(clean), abbr_col == clean, abbr_col.startswith(clean))
+    return or_(
+        name_col.contains(clean, autoescape=True),
+        abbr_col == clean,
+        abbr_col.startswith(clean, autoescape=True),
+    )
 
 
 async def get_by_code(session: AsyncSession, ibge_code: str) -> TerritoryRow | None:
@@ -162,9 +166,9 @@ async def list_territories(
         score = case(
             (abbr_col == clean, 0),
             (name_col == clean, 1),
-            (name_col.startswith(clean), 2),
-            (name_col.like(f"% {clean}%"), 3),
-            (abbr_col.startswith(clean), 4),
+            (name_col.startswith(clean, autoescape=True), 2),
+            (name_col.contains(f" {clean}", autoescape=True), 3),
+            (abbr_col.startswith(clean, autoescape=True), 4),
             else_=5,
         )
         stmt = stmt.order_by(

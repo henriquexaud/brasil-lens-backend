@@ -47,7 +47,9 @@ class RunReport:
 
     @property
     def status(self) -> IngestionStatus:
-        if self.failures and self.written == 0:
+        # `written` conta só linhas alteradas: num re-run idempotente ele é 0
+        # mesmo com escopos bem-sucedidos, então `processed` também conta.
+        if self.failures and self.written == 0 and self.processed <= self.failed:
             return IngestionStatus.FAILED
         if self.failures:
             return IngestionStatus.PARTIAL
