@@ -31,3 +31,19 @@ async def get_write_session() -> AsyncIterator[AsyncSession]:
         except Exception:
             await session.rollback()
             raise
+
+
+# Ainda não há autenticação: todo vínculo pessoal (hoje, só os municípios
+# seguidos) é gravado sob este usuário local. É um valor, não uma ausência, para
+# que a coluna `user_id` já nasça NOT NULL e a UNIQUE `(user_id, …)` já valha.
+LOCAL_USER_ID = "local"
+
+
+async def get_current_user_id() -> str:
+    """Identificador do usuário da requisição.
+
+    O único ponto que muda quando a autenticação chegar: passa a ler o token e
+    devolver o `sub` do provedor (ou 401). Rotas e serviços já recebem o
+    usuário por aqui e não precisam saber de onde ele veio.
+    """
+    return LOCAL_USER_ID
