@@ -5,8 +5,6 @@ originais e a área geodésica da malha canônica, nunca o tamanho da geometria 
 """
 
 import asyncio
-import csv
-import io
 import math
 from collections import Counter
 from datetime import UTC, datetime, timedelta
@@ -18,11 +16,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import redis_cache
 from app.core.cache import TTLCache
-from app.core.config import settings
 from app.core.errors import InvalidParameterError, ProviderError
+from app.providers.inpe import fetch_features as _fetch_wfs
+from app.providers.inpe import fetch_rows
 from app.repositories.boundaries import municipality_areas, state_areas
 from app.schemas.fire_hotspots import FireMunicipality, FireScope, FireSummary
-from app.services.fire_hotspots import _fetch_wfs, _scope_filter, _time_filter
+from app.services.fire_scope import scope_filter as _scope_filter
+from app.services.fire_scope import time_filter as _time_filter
 
 _cache: TTLCache[FireSummary] = TTLCache(7200, 32)
 _failures: TTLCache[bool] = TTLCache(60, 32)
@@ -35,44 +35,7 @@ PAGE_CONCURRENCY = 4
 
 
 async def _fetch_rows(cql: str, total: int) -> list[dict[str, str]]:
-    limit = asyncio.Semaphore(PAGE_CONCURRENCY)
-    async with httpx.AsyncClient(timeout=settings.inpe_queimadas_http_timeout) as client:
-
-        async def page(start: int) -> list[dict[str, str]]:
-            async with limit:
-                response = await client.get(
-                    settings.inpe_queimadas_wfs_url,
-                    params={
-                        "service": "WFS",
-                        "version": "2.0.0",
-                        "request": "GetFeature",
-                        "typeNames": "bdqueimadas:focos",
-                        "outputFormat": "csv",
-                        "propertyName": "id_foco_bdq,id_1,id_2,data_hora_gmt",
-                        "cql_filter": cql,
-                        "count": min(PAGE_SIZE, total - start),
-                        "startIndex": start,
-                        "sortBy": "data_hora_gmt D,id_foco_bdq D",
-                    },
-                )
-            response.raise_for_status()
-            rows = list(csv.DictReader(io.StringIO(response.text)))
-            if not rows or "id_foco_bdq" not in rows[0]:
-                raise ValueError("Página de focos incompleta")
-            return rows
-
-        tasks = [asyncio.create_task(page(start)) for start in range(0, total, PAGE_SIZE)]
-        try:
-            pages = await asyncio.gather(*tasks)
-        finally:
-            # Uma página falhou: as que ainda esperam a vez não vão à fonte.
-            for task in tasks:
-                task.cancel()
-    rows = [row for page_rows in pages for row in page_rows]
-    # Páginas truncadas ou deslocadas (a fonte mudou no meio) não passam.
-    if len(rows) != total or len({row["id_foco_bdq"] for row in rows}) != total:
-        raise ValueError("Contagem de focos mudou durante a consulta; tente novamente")
-    return rows
+    return await fetch_rows(cql, total, page_size=PAGE_SIZE, page_concurrency=PAGE_CONCURRENCY)
 
 
 def aggregate(

@@ -21,9 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_session
 from app.core.config import settings
-from app.core.errors import NotFoundError
 from app.models import TerritoryLevel
-from app.repositories.viewport import locate
 from app.schemas.indicator import TerritorySeriesResponse
 from app.schemas.territory import (
     LocationInput,
@@ -69,10 +67,9 @@ async def locate_territory(
 ) -> TerritoryDetail:
     # Coordenadas precisas não são guardadas nem enviadas a um geocoder externo.
     response.headers["Cache-Control"] = "no-store"
-    code = await locate(session, location.latitude, location.longitude)
-    if code is None:
-        raise NotFoundError("Não encontramos um município brasileiro nessa localização.")
-    return await territories_service.get_detail(session, code)
+    return await territories_service.locate_territory(
+        session, location.latitude, location.longitude
+    )
 
 
 @router.get("/{ibge_code}", response_model=TerritoryDetail, summary="Detalha um território")

@@ -13,7 +13,9 @@ import respx
 from app.core.config import settings
 from app.core.errors import InvalidParameterError, ProviderError, TerritoryNotFoundError
 from app.models import TerritoryLevel
+from app.providers.inpe import parse_feature
 from app.services import fire_hotspots as service
+from app.services import fire_scope
 
 
 def payload() -> dict:
@@ -85,7 +87,7 @@ def test_missing_measurements_are_not_zero_or_false_risk(value: object) -> None:
     raw["properties"].update(
         risco_fogo=value, frp=value, precipitacao=value, numero_dias_sem_chuva=value
     )
-    properties = service._parse_feature(raw).properties
+    properties = parse_feature(raw).properties
     assert (
         properties.fire_risk
         is properties.frp
@@ -102,7 +104,7 @@ async def test_scope_uses_ibge_codes_not_just_bbox(
     monkeypatch: pytest.MonkeyPatch, level: str, code: str, field: str
 ) -> None:
     monkeypatch.setattr(
-        service.territories,
+        fire_scope.territories,
         "get_by_code",
         AsyncMock(return_value=SimpleNamespace(level=TerritoryLevel(level))),
     )
@@ -124,7 +126,7 @@ async def test_invalid_scope_does_not_silently_fall_back_to_brazil(
     ]:
         with pytest.raises(InvalidParameterError):
             await service.get_fire_hotspots(AsyncMock(), level=level, parent_code=code)
-    monkeypatch.setattr(service.territories, "get_by_code", AsyncMock(return_value=None))
+    monkeypatch.setattr(fire_scope.territories, "get_by_code", AsyncMock(return_value=None))
     with pytest.raises(TerritoryNotFoundError):
         await service.get_fire_hotspots(AsyncMock(), level="state", parent_code="99")
 
@@ -199,7 +201,7 @@ async def test_identify_keeps_window_and_orders_points_by_distance() -> None:
     assert result.features[0].id == "inpe:1891867420"
     cql = upstream.calls[0].request.url.params["cql_filter"]
     assert "BBOX(geometria,-49.218900,-2.473600,-49.198900,-2.453600,'EPSG:4326')" in cql
-    assert f"data_hora_gmt <= '{service._iso(at)}'" in cql
+    assert f"data_hora_gmt <= '{fire_scope.iso(at)}'" in cql
     assert result.matched_count == 77157
 
 

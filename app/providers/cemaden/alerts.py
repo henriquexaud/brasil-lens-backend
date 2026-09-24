@@ -13,7 +13,7 @@ O `GetCapabilities` do mesmo GeoServer (troque `wms` por `ows`) lista a camada
 `alertas_vigentes_siaden` — exatamente os alertas em vigor exibidos no mapa.
 Diferente do WMS (pixels), o WFS devolve GeoJSON com atributos, é protocolo
 OGC padrão e autodescritivo (`DescribeFeatureType`), e é a mesma técnica já
-usada neste projeto para o INPE/BDQueimadas (`app/services/fire_hotspots.py`)
+usada neste projeto para o INPE/BDQueimadas (`app/providers/inpe.py`)
 — por isso preferido a um endpoint JSON ad-hoc, mesmo sem documentação de
 negócio: o risco de quebra é o de um schema OGC mudar, não o de um endpoint
 interno desaparecer sem aviso.

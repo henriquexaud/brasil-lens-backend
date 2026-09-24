@@ -10,10 +10,11 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import TerritoryNotFoundError
+from app.core.errors import NotFoundError, TerritoryNotFoundError
 from app.models import TerritoryLevel
 from app.repositories import indicators as indicators_repo
 from app.repositories import territories as territories_repo
+from app.repositories.viewport import locate
 from app.schemas.common import Pagination
 from app.schemas.indicator import IndicatorSeries, SeriesPoint, TerritorySeriesResponse
 from app.schemas.territory import (
@@ -112,6 +113,15 @@ async def get_detail(session: AsyncSession, ibge_code: str) -> TerritoryDetail:
     if row is None:
         raise TerritoryNotFoundError(ibge_code)
     return TerritoryDetail(**await _detail_fields(session, row))
+
+
+async def locate_territory(
+    session: AsyncSession, latitude: float, longitude: float
+) -> TerritoryDetail:
+    code = await locate(session, latitude, longitude)
+    if code is None:
+        raise NotFoundError("Não encontramos um município brasileiro nessa localização.")
+    return await get_detail(session, code)
 
 
 async def get_overview(
