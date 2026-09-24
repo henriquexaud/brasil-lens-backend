@@ -36,7 +36,7 @@ class IndicatorSeed:
     decimal_places: int
     display_order: int
     # Todo indicador de hoje é sociopolítico — daí o default. Um indicador de
-    # outro contexto (clima, biodiversidade) declara o seu explicitamente.
+    # outro contexto (como clima) declara o seu explicitamente.
     context: DataContext = DataContext.SOCIOPOLITICAL
 
 

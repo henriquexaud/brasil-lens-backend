@@ -34,8 +34,8 @@ backend/
 
 ## 2. Padrões e Convenções de Código
 
-- **Tipagem:** Python 3.12 com tipagem estrita via `mypy`. Nenhuma anotação `Any` ou `# type: ignore` deve ser introduzida sem justificativa.
-- **Formatação e Lint:** Utilizamos o `ruff` tanto para linting quanto para formatação de código.
+- **Tipagem:** Python 3.12 com tipagem estrita via `mypy`. Nenhuma anotação `Any` ou `# type: ignore` deve ser introduzida sem justificativa técnica.
+- **Formatação e Lint:** O projeto utiliza o `ruff` para linting e formatação de código.
 - **Nomenclatura:**
   - Módulos, funções e variáveis em `snake_case`.
   - Classes e tipos em `PascalCase`.
@@ -86,5 +86,5 @@ make smoke
 ### 4.3 Adicionar um Novo Provedor Externo
 1. Crie um novo módulo sob `app/providers/<nome_provedor>/`.
 2. O adaptador deve transformar o payload externo no tipo padronizado `IndicatorObservation` (definido em `app.providers.records`).
-3. Registre o novo provedor em `app/providers/registry.py` associando-o ao contexto de dados adequado (`sociopolitical`, `climate_environmental` ou `biodiversity`).
+3. Registre o novo provedor em `app/providers/registry.py` associando-o ao contexto de dados adequado (`sociopolitical` ou `climate_environmental`).
 

@@ -67,7 +67,7 @@ class Indicator(Base, TimestampMixin):
         nullable=False,
         default=IndicatorOrigin.SOURCED,
     )
-    # Agrupamento temático (sociopolítico, clima/ambiente, biodiversidade).
+    # Agrupamento temático (sociopolítico, clima/ambiente).
     # Todo indicador de hoje é sociopolítico — o default cobre isso sem exigir
     # que cada seed declare o óbvio. Ver app/models/context.py.
     context: Mapped[DataContext] = mapped_column(

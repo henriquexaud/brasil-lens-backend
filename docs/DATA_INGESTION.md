@@ -63,7 +63,7 @@ flowchart LR
 
 ### Comandos de Execução
 
-Você pode executar os jobs dentro do container Docker ou diretamente no terminal:
+A execução dos jobs pode ser realizada via container Docker ou diretamente no ambiente configurado:
 
 ```bash
 # Executar o fluxo completo (recomendado na primeira inicialização):
