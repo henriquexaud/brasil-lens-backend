@@ -63,6 +63,10 @@ MAP_FRESHNESS = timedelta(minutes=30)
 # Depois de uma consulta, a próxima espera ao menos isto: se a fonte ainda não
 # publicou o intervalo seguinte, não adianta perguntar de novo em seguida.
 MIN_FRESHNESS_AFTER_FETCH = timedelta(minutes=2)
+# Botão "Atualizar dados": abaixo disto, o clique é ignorado (o dado já é
+# recente o bastante); a partir disto, força a busca na hora em vez de só
+# agendar a renovação em segundo plano (ver `_resolve`).
+FORCE_MIN_AGE = timedelta(minutes=5)
 MAX_DATA_AGE = timedelta(hours=2)
 MAX_FALLBACK_AGE = timedelta(hours=12)
 FUTURE_TOLERANCE = timedelta(minutes=15)
@@ -291,7 +295,11 @@ async def _fetch(
 
 
 async def _resolve(
-    points: list[Point], freshness: timedelta, variant: Variant = "current"
+    points: list[Point],
+    freshness: timedelta,
+    variant: Variant = "current",
+    *,
+    force: bool = False,
 ) -> tuple[dict[str, WeatherReading], bool]:
     """Leituras dos pontos e se alguma delas é um dado anterior.
 
@@ -299,6 +307,11 @@ async def _resolve(
     segundo plano; ausentes são consultadas agora. Se a fonte falha, vale o
     último dado de até doze horas. Sem nenhuma leitura, a falha sobe com a
     causa real.
+
+    `force` é só o botão "Atualizar dados": com a última busca há menos de
+    `FORCE_MIN_AGE`, o pedido é ignorado (dado já recente, mesma resposta de
+    sempre); passado isso, a leitura é buscada agora — não só agendada em
+    segundo plano — para o próprio clique já devolver o dado novo.
     """
     now = datetime.now(UTC)
     known = await _load([_key(variant, point[0]) for point in points], now, freshness)
@@ -306,11 +319,14 @@ async def _resolve(
     fallback: dict[str, WeatherReading] = {}
     missing: list[Point] = []
     renew: list[Point] = []
+    force_now: list[Point] = []
     for point in points:
         reading = known.get(_key(variant, point[0]))
         if reading and _within(reading.city, now, MAX_DATA_AGE):
             usable[point[0]] = reading
-            if not _is_fresh(reading, now, freshness):
+            if force and now - reading.fetched_at >= FORCE_MIN_AGE:
+                force_now.append(point)
+            elif not _is_fresh(reading, now, freshness):
                 renew.append(point)
         else:
             missing.append(point)
@@ -318,8 +334,9 @@ async def _resolve(
                 fallback[point[0]] = reading
 
     outdated = False
-    if missing:
-        fetched, error = await _fetch(missing, variant)
+    to_fetch_now = missing + force_now
+    if to_fetch_now:
+        fetched, error = await _fetch(to_fetch_now, variant)
         usable.update(fetched)
         if error is not None:
             outdated = True
@@ -371,8 +388,10 @@ def _capital_point(capital: tuple[str, str, float, float]) -> Point:
     return (CAPITAL_IBGE_CODES[state], name, state, latitude, longitude)
 
 
-async def _capitals(points: list[Point], variant: Variant) -> WeatherCurrentResponse:
-    readings, outdated = await _resolve(points, MAP_FRESHNESS, variant)
+async def _capitals(
+    points: list[Point], variant: Variant, *, force: bool = False
+) -> WeatherCurrentResponse:
+    readings, outdated = await _resolve(points, MAP_FRESHNESS, variant, force=force)
     # No mapa do Brasil a capital representa a UF e é identificada pela sigla.
     found = [point for point in points if point[0] in readings]
     cities = [
@@ -382,10 +401,12 @@ async def _capitals(points: list[Point], variant: Variant) -> WeatherCurrentResp
     return _response(cities, (readings[point[0]] for point in found), outdated)
 
 
-async def get_current(*, include_forecast: bool = True) -> WeatherCurrentResponse:
+async def get_current(
+    *, include_forecast: bool = True, force: bool = False
+) -> WeatherCurrentResponse:
     """As 27 capitais de uma vez: a primeira etapa do mapa do Brasil."""
     points = [_capital_point(capital) for capital in CAPITALS]
-    return await _capitals(points, "forecast" if include_forecast else "current")
+    return await _capitals(points, "forecast" if include_forecast else "current", force=force)
 
 
 def _sample_size(area_km2: float, municipalities: int) -> int:
@@ -499,7 +520,9 @@ def _state_average(
     )
 
 
-async def get_states_weather(session: AsyncSession) -> WeatherCurrentResponse:
+async def get_states_weather(
+    session: AsyncSession, *, force: bool = False
+) -> WeatherCurrentResponse:
     """Cada UF no mapa do Brasil: a média dos seus pontos, ponderada pela área.
 
     A capital sozinha daria a todo o Amazonas o clima de Manaus, e chuva é
@@ -509,14 +532,14 @@ async def get_states_weather(session: AsyncSession) -> WeatherCurrentResponse:
     """
     samples = await _national_sample(session)
     readings, outdated = await _resolve(
-        [point for sample in samples for point in sample.points], MAP_FRESHNESS
+        [point for sample in samples for point in sample.points], MAP_FRESHNESS, force=force
     )
     cities = [city for sample in samples if (city := _state_average(sample, readings))]
     return _response(cities, readings.values(), outdated)
 
 
 async def get_territory_current(
-    session: AsyncSession, code: str, *, include_forecast: bool = True
+    session: AsyncSession, code: str, *, include_forecast: bool = True, force: bool = False
 ) -> WeatherCurrentResponse:
     territory = await territories.get_by_code(session, code)
     if territory is None:
@@ -528,7 +551,7 @@ async def get_territory_current(
         if capital is None:
             raise InvalidParameterError("Capital não encontrada para este estado.")
         point = _capital_point(capital)
-        readings, outdated = await _resolve([point], SELECTED_FRESHNESS, variant)
+        readings, outdated = await _resolve([point], SELECTED_FRESHNESS, variant, force=force)
         city = readings[point[0]].city.model_copy(update={"id": point[2], "name": point[1]})
         return _response([city], readings.values(), outdated)
     if territory.level != TerritoryLevel.MUNICIPALITY:
@@ -543,7 +566,7 @@ async def get_territory_current(
     )
     state = parent.abbreviation if parent and parent.abbreviation else ""
     point = (code, territory.name, state, *location)
-    readings, outdated = await _resolve([point], SELECTED_FRESHNESS, variant)
+    readings, outdated = await _resolve([point], SELECTED_FRESHNESS, variant, force=force)
     city = readings[code].city.model_copy(update={"id": code, "name": territory.name})
     return _response([city], readings.values(), outdated)
 
@@ -569,12 +592,14 @@ async def get_municipalities_current(
     parent: str,
     offset: int,
     limit: int,
+    *,
+    force: bool = False,
 ) -> WeatherCurrentResponse:
     _, points = await _state_points(session, parent)
     page = points[offset : offset + limit]
     if not page:
         return WeatherCurrentResponse(fetched_at=datetime.now(UTC), cities=[])
-    readings, outdated = await _resolve(page, MAP_FRESHNESS)
+    readings, outdated = await _resolve(page, MAP_FRESHNESS, force=force)
     cities = [_measured(point, readings[point[0]]) for point in page if point[0] in readings]
     return _response(
         cities,
@@ -584,16 +609,20 @@ async def get_municipalities_current(
     )
 
 
-async def get_state_weather(session: AsyncSession, parent: str) -> WeatherCurrentResponse:
+async def get_state_weather(
+    session: AsyncSession, parent: str, *, force: bool = False
+) -> WeatherCurrentResponse:
     abbreviation, points = await _state_points(session, parent)
-    if (cached := _state_responses.get(parent)) is not None:
+    # O botão "Atualizar dados" não pode ser respondido por este cache de
+    # instantes: ele não sabe se a leitura por trás já passou de `FORCE_MIN_AGE`.
+    if not force and (cached := _state_responses.get(parent)) is not None:
         return cached
     if not points:
         return WeatherCurrentResponse(fetched_at=datetime.now(UTC), cities=[])
     # Os primeiros pontos da ordem de dispersão formam a amostra medida; o
     # restante é estimado a partir dela.
     sample = points[:STATE_SAMPLE_SIZE]
-    readings, outdated = await _resolve(sample, MAP_FRESHNESS)
+    readings, outdated = await _resolve(sample, MAP_FRESHNESS, force=force)
     measured = {
         point[0]: _measured(point, readings[point[0]]) for point in sample if point[0] in readings
     }
@@ -670,6 +699,8 @@ async def get_viewport_current(
     bbox: tuple[float, float, float, float],
     zoom: int,
     parent: str | None = None,
+    *,
+    force: bool = False,
 ) -> WeatherCurrentResponse:
     visible = await viewport_repo.weather_points(session, bbox, parent=parent)
     if not visible:
@@ -700,7 +731,7 @@ async def get_viewport_current(
         to_measure = list(chosen.values())
     else:
         to_measure = area
-    readings, outdated = await _resolve(to_measure, MAP_FRESHNESS)
+    readings, outdated = await _resolve(to_measure, MAP_FRESHNESS, force=force)
     # Amostra do estado e municípios já lidos por outras rotas entram de graça.
     sample = [point for points in state_points.values() for point in points[:STATE_SAMPLE_SIZE]]
     known = {**await _peek([p for p in sample + area if p[0] not in readings]), **readings}

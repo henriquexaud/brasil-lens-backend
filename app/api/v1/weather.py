@@ -44,11 +44,12 @@ async def get_current_weather(
     session: Annotated[AsyncSession, Depends(get_session)],
     territory: Annotated[str | None, Query(pattern=r"^\d{2,7}$")] = None,
     forecast: bool = True,
+    force: bool = False,
 ) -> WeatherCurrentResponse:
     return (
-        await get_territory_current(session, territory, include_forecast=forecast)
+        await get_territory_current(session, territory, include_forecast=forecast, force=force)
         if territory
-        else await get_current(include_forecast=forecast)
+        else await get_current(include_forecast=forecast, force=force)
     )
 
 
@@ -107,8 +108,9 @@ async def get_municipalities_weather(
 async def get_state_weather_endpoint(
     session: Annotated[AsyncSession, Depends(get_session)],
     parent: Annotated[str, Query(pattern=r"^\d{2}$")],
+    force: bool = False,
 ) -> WeatherCurrentResponse:
-    return await get_state_weather(session, parent)
+    return await get_state_weather(session, parent, force=force)
 
 
 @router.get(
@@ -121,8 +123,11 @@ async def viewport_weather(
     bbox: str,
     parent: Annotated[str | None, Query(pattern=r"^\d{2}$")] = None,
     zoom: Annotated[int, Query(ge=0, le=22)] = 8,
+    force: bool = False,
 ) -> WeatherCurrentResponse:
-    return await get_viewport_current(session, parse_bbox(bbox, max_span=20), zoom, parent=parent)
+    return await get_viewport_current(
+        session, parse_bbox(bbox, max_span=20), zoom, parent=parent, force=force
+    )
 
 
 @router.get("/municipal-boundaries", response_model=MapFeatureCollection)
@@ -155,5 +160,6 @@ async def viewport_boundaries(
 )
 async def states_weather(
     session: Annotated[AsyncSession, Depends(get_session)],
+    force: bool = False,
 ) -> WeatherCurrentResponse:
-    return await get_states_weather(session)
+    return await get_states_weather(session, force=force)
