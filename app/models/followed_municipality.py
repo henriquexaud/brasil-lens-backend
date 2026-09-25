@@ -1,9 +1,10 @@
 """Município seguido: a relação `usuário ↔ município` do contexto Clima.
 
 É a base de um futuro sistema de alertas — "avise-me quando houver chuva forte
-onde eu acompanho" —, mas por enquanto guarda **só a relação**. Nada de regra
-de disparo, canal de entrega ou dado meteorológico aqui: essas coisas vão
-morar em tabelas próprias que referenciam esta, quando existirem.
+onde eu acompanho" —, mas por enquanto guarda **só a relação** e a preferência
+de recebê-los (`notifications_enabled`). Nada de regra de disparo, canal de
+entrega ou dado meteorológico aqui: essas coisas vão morar em tabelas próprias
+que referenciam esta, quando existirem.
 
 Duas decisões, pelos mesmos motivos das visualizações salvas:
 
@@ -18,7 +19,16 @@ Duas decisões, pelos mesmos motivos das visualizações salvas:
 
 from __future__ import annotations
 
-from sqlalchemy import CheckConstraint, Identity, Index, Integer, String, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Identity,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+    true,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin
@@ -33,6 +43,10 @@ class FollowedMunicipality(Base, TimestampMixin):
     user_id: Mapped[str] = mapped_column(String(64), nullable=False)
     # Código IBGE de 7 dígitos — o mesmo `ibgeCode` do resto da API.
     municipality_code: Mapped[str] = mapped_column(String(7), nullable=False)
+    # Ligadas por padrão ao seguir: é o gesto principal, desligar é a exceção.
+    notifications_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=true()
+    )
 
     __table_args__ = (
         # Seguir duas vezes o mesmo município não existe. Como a coluna líder é

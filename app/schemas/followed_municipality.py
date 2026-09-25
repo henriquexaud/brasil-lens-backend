@@ -20,9 +20,20 @@ class FollowedMunicipalityOut(CamelModel):
     state_name: str | None = None
     state_abbreviation: str | None = None
     followed_at: datetime
+    notifications_enabled: bool
 
 
 class FollowedMunicipalityListResponse(CamelModel):
     """Lista completa, sem paginação: são os municípios de *um* usuário."""
 
     municipalities: list[FollowedMunicipalityOut]
+
+
+class NotificationsUpdate(CamelModel):
+    """Corpo de POST .../notifications: o estado desejado, não um alternador.
+
+    O cliente já sabe o estado atual (veio na listagem), então manda o que
+    quer — evita que dois cliques em voo destoguem um do outro.
+    """
+
+    enabled: bool

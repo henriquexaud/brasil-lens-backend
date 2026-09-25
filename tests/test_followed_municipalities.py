@@ -17,7 +17,11 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import InvalidParameterError, TerritoryNotFoundError
+from app.core.errors import (
+    FollowedMunicipalityNotFoundError,
+    InvalidParameterError,
+    TerritoryNotFoundError,
+)
 from app.models import FollowedMunicipality
 from app.services import followed_municipalities as service
 
@@ -80,6 +84,8 @@ async def test_follow_list_unfollow_round_trip(session: AsyncSession) -> None:
         "35",
         "SP",
     )
+    # Notificações começam ligadas: seguir já é o gesto de querer acompanhar.
+    assert followed.notifications_enabled is True
 
     await service.follow(session, user, BRASILIA)
     listed = await service.list_followed(session, user)
@@ -130,6 +136,23 @@ async def test_only_existing_municipalities_can_be_followed(session: AsyncSessio
     await session.rollback()
 
 
+async def test_set_notifications_toggles_and_requires_a_follow(session: AsyncSession) -> None:
+    await _require_municipalities(session)
+    user = _user()
+
+    with pytest.raises(FollowedMunicipalityNotFoundError):
+        await service.set_notifications(session, user, SAO_PAULO, False)
+
+    await service.follow(session, user, SAO_PAULO)
+    disabled = await service.set_notifications(session, user, SAO_PAULO, False)
+    assert disabled.notifications_enabled is False
+
+    enabled = await service.set_notifications(session, user, SAO_PAULO, True)
+    assert enabled.notifications_enabled is True
+
+    await session.rollback()
+
+
 async def test_http_contract(session: AsyncSession) -> None:
     await _require_municipalities(session)
     base = "/api/v1/me/followed-municipalities"
@@ -145,12 +168,24 @@ async def test_http_contract(session: AsyncSession) -> None:
         body = created.json()
         assert body["municipalityCode"] == SAO_PAULO
         assert body["stateAbbreviation"] == "SP"
+        assert body["notificationsEnabled"] is True
         assert "followedAt" in body
 
         assert (await client.put(f"{base}/{SAO_PAULO}")).status_code == 200
 
         listed = (await client.get(base)).json()["municipalities"]
         assert [item["municipalityCode"] for item in listed] == [SAO_PAULO]
+
+        off = await client.post(f"{base}/{SAO_PAULO}/notifications", json={"enabled": False})
+        assert off.status_code == 200
+        assert off.json()["notificationsEnabled"] is False
+
+        on = await client.post(f"{base}/{SAO_PAULO}/notifications", json={"enabled": True})
+        assert on.status_code == 200
+        assert on.json()["notificationsEnabled"] is True
+
+        missing = await client.post(f"{base}/{BRASILIA}/notifications", json={"enabled": False})
+        assert missing.status_code == 404
 
         assert (await client.delete(f"{base}/{SAO_PAULO}")).status_code == 204
         # Deixar de seguir de novo não é erro: o estado pedido já vale.

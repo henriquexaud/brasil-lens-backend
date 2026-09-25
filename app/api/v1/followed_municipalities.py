@@ -4,13 +4,16 @@ Separado das rotas de clima de propósito: carregar o tempo de um município e
 saber se o usuário o acompanha são perguntas diferentes, com caches diferentes
 — a primeira é projeção pública e cacheável, a segunda é pessoal e `no-store`.
 
-    GET    /me/followed-municipalities          → lista (mais recentes primeiro)
-    PUT    /me/followed-municipalities/{code}   → segue    201 (novo) / 200 (já seguia)
-    DELETE /me/followed-municipalities/{code}   → deixa    204 (seguia ou não)
+    GET    /me/followed-municipalities                      lista
+    PUT    /me/followed-municipalities/{code}               segue: 201 (novo) / 200 (já segue)
+    DELETE /me/followed-municipalities/{code}               deixa: 204
+    POST   /me/followed-municipalities/{code}/notifications notificações: 200 / 404
 
 `/me` é o usuário da requisição (ver `get_current_user_id`). PUT e DELETE são
 idempotentes: o recurso é o próprio município, então repetir o pedido depois
-de uma atualização otimista no cliente nunca vira erro.
+de uma atualização otimista no cliente nunca vira erro. Já o alerta de
+notificações é uma ação sobre um vínculo que precisa existir — por isso POST,
+não PUT, e por isso 404 quando não há o que ligar ou desligar.
 """
 
 from typing import Annotated
@@ -23,6 +26,7 @@ from app.core.config import settings
 from app.schemas.followed_municipality import (
     FollowedMunicipalityListResponse,
     FollowedMunicipalityOut,
+    NotificationsUpdate,
 )
 from app.services import followed_municipalities as followed_service
 
@@ -82,3 +86,20 @@ async def unfollow(
     session: Annotated[AsyncSession, Depends(get_write_session)],
 ) -> None:
     await followed_service.unfollow(session, user_id, municipality_code)
+
+
+@router.post(
+    "/{municipality_code}/notifications",
+    response_model=FollowedMunicipalityOut,
+    responses={404: {"description": "Você não segue este município"}},
+    summary="Liga ou desliga as notificações de um município seguido",
+)
+async def set_notifications(
+    municipality_code: MunicipalityCode,
+    body: NotificationsUpdate,
+    user_id: UserId,
+    session: Annotated[AsyncSession, Depends(get_write_session)],
+) -> FollowedMunicipalityOut:
+    return await followed_service.set_notifications(
+        session, user_id, municipality_code, body.enabled
+    )

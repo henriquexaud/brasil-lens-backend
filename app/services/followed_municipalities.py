@@ -10,7 +10,11 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import InvalidParameterError, TerritoryNotFoundError
+from app.core.errors import (
+    FollowedMunicipalityNotFoundError,
+    InvalidParameterError,
+    TerritoryNotFoundError,
+)
 from app.models import TerritoryLevel
 from app.repositories import followed_municipalities as followed_repo
 from app.repositories import territories as territories_repo
@@ -29,6 +33,7 @@ def _to_schema(row: FollowedRow) -> FollowedMunicipalityOut:
         state_name=row.state_name,
         state_abbreviation=row.state_abbreviation,
         followed_at=row.followed_at,
+        notifications_enabled=row.notifications_enabled,
     )
 
 
@@ -61,3 +66,16 @@ async def unfollow(session: AsyncSession, user_id: str, code: str) -> None:
     # Diferente de apagar uma visualização por id, aqui o recurso é endereçado
     # pelo município, e o cliente pode repetir o pedido depois de um otimista.
     await followed_repo.unfollow(session, user_id, code)
+
+
+async def set_notifications(
+    session: AsyncSession, user_id: str, code: str, enabled: bool
+) -> FollowedMunicipalityOut:
+    """Liga/desliga as notificações. Diferente de seguir/deixar, aqui 404 é
+    o erro certo: não há vínculo nenhum para carregar a preferência."""
+    found = await followed_repo.set_notifications(session, user_id, code, enabled)
+    if not found:
+        raise FollowedMunicipalityNotFoundError(code)
+    row = await followed_repo.get_for_user(session, user_id, code)
+    assert row is not None  # acabou de ser atualizado nesta transação
+    return _to_schema(row)

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Row, Select, delete, select
+from sqlalchemy import Row, Select, delete, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -26,6 +26,7 @@ class FollowedRow:
     state_name: str | None
     state_abbreviation: str | None
     followed_at: datetime
+    notifications_enabled: bool
 
 
 def _select_rows(user_id: str) -> Select[Any]:
@@ -44,6 +45,7 @@ def _select_rows(user_id: str) -> Select[Any]:
             state.name.label("state_name"),
             state.abbreviation.label("state_abbreviation"),
             FollowedMunicipality.created_at.label("followed_at"),
+            FollowedMunicipality.notifications_enabled,
         )
         .join(
             municipality,
@@ -98,3 +100,17 @@ async def unfollow(session: AsyncSession, user_id: str, code: str) -> int:
         )
     )
     return result.rowcount or 0
+
+
+async def set_notifications(session: AsyncSession, user_id: str, code: str, enabled: bool) -> bool:
+    """Liga/desliga as notificações do vínculo. Devolve `True` se o vínculo existe."""
+    stmt = (
+        update(FollowedMunicipality)
+        .where(
+            FollowedMunicipality.user_id == user_id,
+            FollowedMunicipality.municipality_code == code,
+        )
+        .values(notifications_enabled=enabled)
+        .returning(FollowedMunicipality.id)
+    )
+    return (await session.execute(stmt)).scalar_one_or_none() is not None

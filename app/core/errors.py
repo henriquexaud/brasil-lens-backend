@@ -48,6 +48,16 @@ class SavedViewNotFoundError(NotFoundError):
         super().__init__(f"Visualização '{view_id}' não existe.", viewId=view_id)
 
 
+class FollowedMunicipalityNotFoundError(NotFoundError):
+    code = "followed_municipality_not_found"
+
+    def __init__(self, municipality_code: str) -> None:
+        super().__init__(
+            f"Você não segue o município '{municipality_code}'.",
+            municipalityCode=municipality_code,
+        )
+
+
 class ConflictError(DomainError):
     """Estado atual do recurso impede a escrita (ex.: nome já usado)."""
 
