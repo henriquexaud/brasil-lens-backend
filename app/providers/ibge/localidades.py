@@ -2,10 +2,8 @@
 
 `https://servicodados.ibge.gov.br/api/v1/localidades`
 
-Esta é a **única** fonte de nomes de território. A API de agregados devolve
-nomes com sufixo de UF no nível municipal (ex.: "Adamantina - SP"), o que
-contaminaria a busca e a exibição; por isso valores e nomes vêm de lugares
-diferentes, casados pelo código IBGE.
+Esta é a fonte dos nomes e códigos territoriais que relacionam as geometrias
+com municípios, estados e regiões.
 """
 
 from __future__ import annotations

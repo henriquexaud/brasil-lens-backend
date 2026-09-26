@@ -59,7 +59,7 @@ async def test_resposta_que_nao_e_featurecollection_falha_alto() -> None:
 
 @respx.mock
 async def test_erro_http_da_fonte_vira_provider_error() -> None:
-    """403 é o comportamento real do endpoint legado do SIDRA.
+    """Uma resposta HTTP de erro da API de malhas do IBGE vira erro de provedor.
 
     Classificar como ProviderError permite à ingestão tratar o escopo como
     falho e seguir com os demais, em vez de abortar tudo.

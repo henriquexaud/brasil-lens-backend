@@ -6,8 +6,7 @@ Fluxo:
 
 1. `GET /estacoes/T` — metadado de todas as estações operantes (uma
    requisição).
-2. Upsert em lote de `weather_stations` (UNNEST, mesmo padrão de
-   `import_indicators.py` para `indicator_values`).
+2. Upsert em lote de `weather_stations` com UNNEST para reduzir viagens ao banco.
 3. Para cada estação, `GET /estacao/{inicio}/{fim}/{codigo}` — uma
    requisição por estação, em lotes de concorrência limitada
    (`settings.inmet_max_concurrency`), pelo mesmo motivo que a importação

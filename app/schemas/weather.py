@@ -2,9 +2,7 @@
 
 Mesma decisão de `schemas/map.py` (FeatureCollection válida com membros
 estrangeiros, consumível direto pelo `<GeoJSON>` do react-leaflet), mas sem
-`scope`/`indicator`/`classification`: uma estação ou um alerta não tem
-recorte territorial nem classe de quantil — ver `docs/ARCHITECTURE.md`
-(contexto Clima) para o porquê.
+o escopo da malha: cada estação ou alerta tem sua própria geometria.
 """
 
 from __future__ import annotations

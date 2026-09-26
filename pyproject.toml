@@ -1,7 +1,7 @@
 [project]
 name = "brasil-lens-api"
 version = "0.1.0"
-description = "API de exploração de dados territoriais, demográficos e econômicos do Brasil"
+description = "API geográfica de clima e meio ambiente do Brasil"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi==0.115.6",

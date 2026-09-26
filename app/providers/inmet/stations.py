@@ -21,7 +21,7 @@ Duas chamadas, contratos verificados de formas diferentes:
    no corpo, não no status, porque é assim que esta fonte específica sinaliza.
 
 Iteração estação-por-estação (não um endpoint "todas as estações hoje") pelo
-mesmo motivo que `import_indicators.py` consulta municípios UF-por-UF: um
+mesmo motivo que a importação das malhas consulta municípios UF-por-UF: um
 payload de centenas de estações × dias de uma vez é a forma mais confiável de
 tomar timeout — e o candidato a endpoint em lote (`/estacao/dados/{data}`,
 documentado por clientes de terceiros) devolveu 404 confirmado por chamada

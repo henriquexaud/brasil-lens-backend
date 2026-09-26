@@ -1,4 +1,4 @@
-"""Município seguido: a relação `usuário ↔ município` do contexto Clima.
+"""Município seguido: relação entre usuário e município acompanhado.
 
 É a base de um futuro sistema de alertas — "avise-me quando houver chuva forte
 onde eu acompanho" —, mas por enquanto guarda **só a relação** e a preferência
@@ -6,7 +6,7 @@ de recebê-los (`notifications_enabled`). Nada de regra de disparo, canal de
 entrega ou dado meteorológico aqui: essas coisas vão morar em tabelas próprias
 que referenciam esta, quando existirem.
 
-Duas decisões, pelos mesmos motivos das visualizações salvas:
+Duas decisões de modelagem:
 
 * o município é guardado pelo **código IBGE**, sem FK para `territories` e sem
   copiar nome ou UF — nome e UF são lidos por JOIN na listagem. A existência

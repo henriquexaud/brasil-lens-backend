@@ -10,11 +10,40 @@ import enum
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, Enum, Identity, Index, Integer, String, Text, func
+from sqlalchemy import (
+    BigInteger,
+    Enum,
+    Identity,
+    Index,
+    Integer,
+    SmallInteger,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base
+from app.db.base import Base, TimestampMixin
+
+
+class Dataset(Base, TimestampMixin):
+    """Proveniência de um conjunto de valores ou malhas geoespaciais."""
+
+    __tablename__ = "datasets"
+
+    id: Mapped[int] = mapped_column(SmallInteger, Identity(), primary_key=True)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    code: Mapped[str] = mapped_column(String(96), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    url: Mapped[str | None] = mapped_column(Text)
+    source_updated_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+
+    __table_args__ = (UniqueConstraint("source", "code", name="uq_datasets_source_code"),)
+
+    def __repr__(self) -> str:  # pragma: no cover - diagnóstico
+        return f"<Dataset {self.source}:{self.code}>"
 
 
 class IngestionStatus(str, enum.Enum):

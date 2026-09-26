@@ -62,7 +62,7 @@ def _to_row(record: Row[Any]) -> FollowedRow:
 
 
 async def list_for_user(session: AsyncSession, user_id: str) -> list[FollowedRow]:
-    """Mais recentes primeiro, como as visualizações salvas."""
+    """Mais recentes primeiro para facilitar o acesso aos últimos vínculos."""
     stmt = _select_rows(user_id).order_by(
         FollowedMunicipality.created_at.desc(), FollowedMunicipality.id.desc()
     )

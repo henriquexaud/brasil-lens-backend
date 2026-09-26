@@ -1,29 +1,14 @@
-"""Projeção de leitura do mapa: uma query, uma resposta.
+"""Projeção de leitura do mapa: malha territorial e atributos espaciais.
 
-Esta é a consulta mais importante do produto. Ela resolve, de uma vez:
-
-* o escopo territorial (todos os estados, ou os municípios de uma UF);
-* o ano efetivo quando o cliente pede ``latest``;
-* o valor do indicador por território (inclusive ausência de valor);
-* a geometria **já simplificada** no LOD pedido;
-* o bounding box do escopo, para o mapa dar `fitBounds` sem ler geometria.
-
-Decisões deliberadas:
-
-* ``LEFT JOIN`` no valor — um território sem dado precisa ser desenhado (com
-  estilo de "sem dado"), não omitido.
-* ``INNER JOIN`` na geometria — sem geometria não há o que desenhar.
-* Estatísticas e classificação **não** são calculadas aqui. São poucas centenas
-  de números e virariam colunas repetidas em cada linha; além disso, calculá-las
-  em `services/classification.py` as torna testáveis sem banco.
-* Nenhuma simplificação em tempo de requisição: ``ST_AsGeoJSON`` lê geometria já
-  reduzida na ingestão.
+Resolve de forma direta e otimizada:
+* o escopo territorial (todas as UFs, ou os municípios de um estado);
+* a geometria no LOD pedido (overview ou detail);
+* o bounding box de cada território para enquadramento do mapa.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,8 +24,6 @@ class MapFeatureRow:
     abbreviation: str | None
     parent_ibge_code: str | None
     parent_name: str | None
-    value: Decimal | None
-    # GeoJSON ainda como texto: quem serializa decide quando (e se) desserializa.
     geometry_json: str
     bbox: tuple[float | None, float | None, float | None, float | None]
 
@@ -48,8 +31,6 @@ class MapFeatureRow:
 @dataclass(slots=True)
 class MapProjection:
     features: list[MapFeatureRow]
-    # Ano efetivamente usado. Difere do pedido quando o cliente manda `latest`.
-    resolved_year: int | None
 
 
 _MAP_SQL = text(
@@ -71,20 +52,6 @@ _MAP_SQL = text(
          WHERE t.level = CAST(:level AS territory_level)
            AND (CAST(:parent_id AS integer) IS NULL
                 OR t.parent_id = CAST(:parent_id AS integer))
-    ),
-    -- Resolução de `latest` no MESMO round-trip: o último ano disponível
-    -- daquele indicador DENTRO deste escopo territorial.
-    target_year AS (
-        SELECT CASE
-                   WHEN CAST(:year AS smallint) IS NOT NULL
-                       THEN CAST(:year AS smallint)
-                   ELSE (
-                       SELECT MAX(v.reference_year)
-                         FROM indicator_values v
-                        WHERE v.indicator_id = CAST(:indicator_id AS smallint)
-                          AND v.territory_id IN (SELECT id FROM scope)
-                   )
-               END AS reference_year
     )
     SELECT s.ibge_code,
            s.name,
@@ -96,18 +63,11 @@ _MAP_SQL = text(
            s.bbox_south,
            s.bbox_east,
            s.bbox_north,
-           v.value,
-           (SELECT reference_year FROM target_year) AS resolved_year,
-           CASE WHEN CAST(:with_geometry AS boolean)
-                THEN ST_AsGeoJSON(g.geom) ELSE '' END AS geometry_json
+           ST_AsGeoJSON(g.geom) AS geometry_json
       FROM scope s
       JOIN territory_geometries g
              ON g.territory_id = s.id
             AND g.lod = CAST(:lod AS geometry_lod)
-      LEFT JOIN indicator_values v
-             ON v.territory_id = s.id
-            AND v.indicator_id = CAST(:indicator_id AS smallint)
-            AND v.reference_year = (SELECT reference_year FROM target_year)
      ORDER BY s.name
     """
 )
@@ -119,49 +79,32 @@ async def fetch_map_projection(
     level: TerritoryLevel,
     lod: GeometryLOD,
     parent_id: int | None = None,
-    indicator_id: int | None = None,
-    year: int | None = None,
-    with_geometry: bool = True,
 ) -> MapProjection:
-    """Executa a projeção do mapa.
-
-    `indicator_id=None` devolve apenas a geometria (mapa base sem coropleta):
-    o LEFT JOIN simplesmente não casa e todos os valores vêm nulos, sem
-    precisar de uma segunda query. `with_geometry=False` faz o inverso — só os
-    valores, com `geometry_json` vazio — para trocar indicador ou ano sem
-    retransmitir a malha.
-    """
+    """Executa a projeção da malha territorial para o mapa."""
     result = await session.execute(
         _MAP_SQL,
         {
             "level": level.value,
             "lod": lod.value,
             "parent_id": parent_id,
-            "indicator_id": indicator_id,
-            "year": year,
-            "with_geometry": with_geometry,
         },
     )
 
-    features: list[MapFeatureRow] = []
-    resolved_year: int | None = None
-    for row in result:
-        resolved_year = row.resolved_year
-        features.append(
-            MapFeatureRow(
-                ibge_code=row.ibge_code,
-                name=row.name,
-                level=row.level,
-                abbreviation=row.abbreviation,
-                parent_ibge_code=row.parent_ibge_code,
-                parent_name=row.parent_name,
-                value=row.value,
-                geometry_json=row.geometry_json,
-                bbox=(row.bbox_west, row.bbox_south, row.bbox_east, row.bbox_north),
-            )
+    features: list[MapFeatureRow] = [
+        MapFeatureRow(
+            ibge_code=row.ibge_code,
+            name=row.name,
+            level=row.level,
+            abbreviation=row.abbreviation,
+            parent_ibge_code=row.parent_ibge_code,
+            parent_name=row.parent_name,
+            geometry_json=row.geometry_json,
+            bbox=(row.bbox_west, row.bbox_south, row.bbox_east, row.bbox_north),
         )
+        for row in result
+    ]
 
-    return MapProjection(features=features, resolved_year=resolved_year)
+    return MapProjection(features=features)
 
 
 _SINGLE_FEATURE_SQL = text(
@@ -206,15 +149,13 @@ async def fetch_single_feature(
         abbreviation=result.abbreviation,
         parent_ibge_code=result.parent_ibge_code,
         parent_name=result.parent_name,
-        value=None,
         geometry_json=result.geometry_json,
         bbox=(result.bbox_west, result.bbox_south, result.bbox_east, result.bbox_north),
     )
 
 
-# Jobs cuja execução muda o que o mapa desenha. Os de clima rodam a cada poucos
-# minutos e não entram: invalidariam o cache do mapa sem mudar nada nele.
-_MAP_JOBS = ("import_territories", "import_geometries", "import_indicators", "seed_indicators")
+# Jobs cuja execução altera a malha territorial ou de geometrias servida no mapa.
+_MAP_JOBS = ("import_territories", "import_geometries")
 
 _DATA_VERSION_SQL = text(
     """
@@ -227,6 +168,6 @@ _DATA_VERSION_SQL = text(
 
 
 async def fetch_data_version(session: AsyncSession) -> int:
-    """Instante (epoch) da última ingestão que alterou territórios, malhas ou valores."""
+    """Instante (epoch) da última ingestão que alterou territórios ou malhas."""
     result = await session.execute(_DATA_VERSION_SQL, {"jobs": list(_MAP_JOBS)})
     return int(result.scalar_one())

@@ -2,11 +2,10 @@
 
 Há duas classes de teste, de propósito:
 
-* **unitários** — normalização dos providers, classificação, fórmula dos
-  derivados. Rodam sem banco e sem rede, a partir de fixtures capturadas das
-  respostas reais do IBGE.
-* **integração** (`@pytest.mark.db`) — idempotência da ingestão e as consultas
-  do mapa. Precisam de PostgreSQL/PostGIS; são puladas com mensagem clara
+* **unitários** — normalização de fontes ambientais, cache e regras de clima.
+  Rodam sem banco e sem rede, a partir de fixtures das fontes.
+* **integração** (`@pytest.mark.db`) — persistência e consultas espaciais.
+  Precisam de PostgreSQL/PostGIS; são puladas com mensagem clara
   quando o banco não está acessível.
 """
 
@@ -60,9 +59,10 @@ async def session() -> AsyncIterator[AsyncSession]:
             # Falha cedo e com mensagem útil se não houver banco.
             from sqlalchemy import text
 
-            await db_session.execute(text("SELECT 1"))
+            try:
+                await db_session.execute(text("SELECT 1"))
+            except Exception as exc:
+                pytest.skip(f"PostgreSQL/PostGIS indisponível ({exc}). Rode 'make up' antes.")
             yield db_session
-    except Exception as exc:
-        pytest.skip(f"PostgreSQL/PostGIS indisponível ({exc}). Rode 'make up' antes.")
     finally:
         await engine.dispose()

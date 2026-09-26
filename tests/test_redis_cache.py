@@ -1,6 +1,7 @@
 """Round-trip tipado, expiração explícita e indisponibilidade não fatal."""
 
-from unittest.mock import AsyncMock
+from fnmatch import fnmatchcase
+from unittest.mock import AsyncMock, Mock
 
 from redis.exceptions import ConnectionError
 
@@ -9,13 +10,14 @@ from app.schemas.fire_hotspots import FireHotspotDetails
 
 
 async def test_shared_cache_round_trip_with_ttl_and_versioned_key(monkeypatch):
+    monkeypatch.setattr(redis_cache.settings, "redis_cache_prefix", "brasil-lens:v4")
     connection = AsyncMock()
     monkeypatch.setattr(redis_cache, "client", lambda: connection)
     value = FireHotspotDetails(features=[], matched_count=0)
     await redis_cache.write("test", "one", value, 600)
     args = connection.set.call_args
     assert args.kwargs["ex"] == 600
-    assert args.args[0].startswith("brasil-lens:v3:test:")
+    assert args.args[0].startswith("brasil-lens:v4:test:")
     connection.get.return_value = args.args[1]
     assert await redis_cache.read("test", "one", FireHotspotDetails) == value
     assert redis_cache.cache_key("test", "one") != redis_cache.cache_key("test", "two")
@@ -85,3 +87,37 @@ async def test_many_keys_without_redis_are_all_misses(monkeypatch):
     await redis_cache.write_many(
         "test", {"a": FireHotspotDetails(features=[], matched_count=0)}, 60
     )
+
+
+async def test_previous_cache_is_purged_in_batches_without_touching_other_namespaces(monkeypatch):
+    keys = {f"review:v3:map-values:{i}" for i in range(1201)}
+    retained = {"review:v4:map-projection:current", "another-app:v3:map-values:one"}
+    keys.update(retained)
+
+    async def scan_iter(*, match, count):
+        assert count == 500
+        for key in list(keys):
+            if fnmatchcase(key, match):
+                yield key.encode()
+
+    async def delete(*batch):
+        keys.difference_update(key.decode() for key in batch)
+
+    connection = Mock(scan_iter=scan_iter, delete=AsyncMock(side_effect=delete))
+    monkeypatch.setattr(redis_cache, "client", lambda: connection)
+    monkeypatch.setattr(redis_cache.settings, "redis_cache_prefix", "review:v4")
+    await redis_cache.purge_previous_cache_version()
+    assert keys == retained
+    assert [len(call.args) for call in connection.delete.call_args_list] == [500, 500, 201]
+
+
+async def test_previous_cache_cleanup_failure_does_not_prevent_startup(monkeypatch):
+    async def scan_iter(**kwargs):
+        raise ConnectionError("offline")
+        yield  # pragma: no cover — makes this an async iterator
+
+    monkeypatch.setattr(redis_cache, "client", lambda: Mock(scan_iter=scan_iter))
+    monkeypatch.setattr(redis_cache.settings, "redis_cache_prefix", "review:v4")
+    monkeypatch.setattr(redis_cache, "_unavailable_until", 0)
+    await redis_cache.purge_previous_cache_version()
+    assert redis_cache._unavailable_until > 0

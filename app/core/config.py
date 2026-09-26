@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     # com TTL. Os dados só mudam durante a ingestão, então todas as sessões pedem
     # exatamente a mesma resposta de mapa. 0 desliga.
     redis_url: str | None = None
-    redis_cache_prefix: str = "brasil-lens:v3"
+    redis_cache_prefix: str = "brasil-lens:v4"
     read_cache_ttl_seconds: int = 300
     read_cache_max_entries: int = 64
     # Teto de features por entrada cacheada. Uma projeção municipal completa
@@ -40,8 +40,8 @@ class Settings(BaseSettings):
     read_cache_max_features: int = 200
     # Cache-Control max-age das respostas geográficas.
     http_cache_max_age: int = 300
-    # /map e /map/values: o ETag carrega a versão da ingestão, então o navegador
-    # pode reusar a malha por mais tempo e revalidar em segundo plano.
+    # O ETag carrega a versão da ingestão, então o navegador pode reutilizar a
+    # malha por mais tempo e revalidar em segundo plano.
     map_http_cache_max_age: int = 3600
     map_http_stale_while_revalidate: int = 86400
 
@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     ibge_http_timeout: float = 120.0
     ibge_max_concurrency: int = 4
 
-    # Clima — ver docs/ARCHITECTURE.md (contexto Clima) e app/providers/inmet/.
+    # Clima — ver docs/ARCHITECTURE.md e app/providers/inmet/.
     # Timeout menor que o do IBGE de propósito: são chamadas pequenas (uma
     # estação, um payload de alertas), repetidas a cada ciclo do scheduler —
     # não malhas municipais de dezenas de MB.
@@ -66,7 +66,7 @@ class Settings(BaseSettings):
 
     # CEMADEN — riscos geo-hidrológicos (inundação, enxurrada, deslizamento),
     # complementar aos avisos meteorológicos do INMET acima. Sem API pública
-    # documentada (ver docs/ARCHITECTURE.md, contexto Clima): a mesma situação
+    # documentada (ver docs/ARCHITECTURE.md): a mesma situação
     # de fato do INMET, cuja `inmet_alerts_base_url` também não é documentada
     # — a diferença é que aqui a fonte real é um GeoServer OGC padrão (WFS),
     # não um endpoint JSON ad-hoc, o que reduz a fragilidade (protocolo

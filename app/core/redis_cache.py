@@ -116,6 +116,27 @@ async def write_many(namespace: str, values: Mapping[str, BaseModel], ttl: int) 
         _failed()
 
 
+async def purge_previous_cache_version() -> None:
+    """Remove chaves da versão anterior após a troca do contrato de cache."""
+    connection = client()
+    suffix = ":v4"
+    if connection is None or not settings.redis_cache_prefix.endswith(suffix):
+        return
+    previous_prefix = settings.redis_cache_prefix[: -len(suffix)] + ":v3:"
+    try:
+        batch: list[str] = []
+        async for key in connection.scan_iter(match=f"{previous_prefix}*", count=500):
+            batch.append(key)
+            if len(batch) == 500:
+                await connection.delete(*batch)
+                batch.clear()
+        if batch:
+            await connection.delete(*batch)
+        logger.info("cache.redis_previous_version_purged")
+    except RedisError:
+        _failed()
+
+
 async def close() -> None:
     global _client
     if _client is not None:

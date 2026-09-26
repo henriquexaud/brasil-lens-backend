@@ -2,9 +2,7 @@
 
 Decisão central do modelo: **uma única entidade territorial** com `level` e
 `parent_id` auto-referente, em vez de tabelas por nível. O motivo determinante é
-que `indicator_values` passa a ter uma FK real para território — a alternativa
-(`territory_type` + `territory_id` polimórfico) não tem integridade referencial.
-Ver docs/ARCHITECTURE.md §4.1.
+que busca, mapa e fontes ambientais compartilham a mesma hierarquia geográfica.
 """
 
 from __future__ import annotations
@@ -59,8 +57,8 @@ class GeometryLOD(str, enum.Enum):
 # Estes dois mapas são o que a API precisa saber para aceitar ou recusar um
 # recorte, e ficam aqui — ao lado do enum — porque é isto que torna verdadeira a
 # promessa do docstring acima: adicionar um nível territorial é editar *um*
-# arquivo. Enquanto viviam dentro de cada serviço, `/map` e `/views` podiam
-# divergir sobre quem pode ser pai de quem.
+# arquivo. Assim a regra de hierarquia é compartilhada pela busca, pelo mapa e
+# pela localização sem cópias por endpoint.
 # ---------------------------------------------------------------------------
 
 # Níveis que exigem recorte por pai. Sem esta regra, uma requisição a

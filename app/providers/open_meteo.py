@@ -11,17 +11,7 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from app.core.errors import ProviderError, ProviderRateLimitedError
-from app.models import DataContext
-from app.providers.descriptor import ProviderDescriptor
 from app.schemas.weather import WeatherCity, WeatherForecastDay
-
-PROVIDER = ProviderDescriptor(
-    key="open_meteo",
-    name="Open-Meteo — Condições atuais e previsão",
-    context=DataContext.CLIMATE_ENVIRONMENTAL,
-    provides=(),
-    homepage="https://open-meteo.com/",
-)
 
 # UF, capital, latitude, longitude.
 CAPITALS = (

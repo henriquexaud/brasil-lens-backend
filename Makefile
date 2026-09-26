@@ -7,7 +7,7 @@ COMPOSE := docker compose
 # assado na imagem, não sobre o que está em edição.
 DEV := docker compose -f docker-compose.yml -f docker-compose.dev.yml
 
-.PHONY: help up up-api dev down logs migrate revision ingest ingest-quick seed test lint format check smoke psql reset
+.PHONY: help up up-api dev down logs migrate revision ingest ingest-quick test lint format check smoke psql reset
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -33,10 +33,7 @@ migrate:        ## Aplica as migrations (a API já faz isso ao subir)
 revision:       ## Cria migration nova: make revision m="mensagem"
 	$(DEV) run --rm api alembic revision -m "$(m)"
 
-seed:           ## Popula apenas o catálogo de indicadores
-	$(COMPOSE) run --rm api python -m app.jobs.seed_indicators
-
-ingest:         ## Ingestão completa do IBGE (territórios + geometrias + indicadores)
+ingest:         ## Importa territórios e geometrias do IBGE para o mapa
 	$(COMPOSE) run --rm api python -m app.jobs.bootstrap
 
 ingest-quick:   ## Ingestão sem geometrias municipais
@@ -54,8 +51,8 @@ format:         ## Formata o código
 check:          ## Tudo que um CI checaria: testes + lint
 	$(MAKE) test && $(MAKE) lint
 
-smoke:          ## Exercita GET/POST/PUT/DELETE contra a API no ar
-	./scripts/smoke_crud.sh
+smoke:          ## Confere API e camada geográfica contra a API no ar
+	./scripts/smoke_map.sh
 
 psql:           ## Abre um psql no banco
 	$(COMPOSE) exec db psql -U brasil_lens -d brasil_lens

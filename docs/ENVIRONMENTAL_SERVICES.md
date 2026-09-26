@@ -1,6 +1,6 @@
 # Serviços Ambientais e Meteorológicos — Brasil Lens
 
-Além dos dados censitários e socioeconômicos do IBGE, o Brasil Lens integra dados em tempo real sobre clima, focos de calor, alertas de desastres naturais e hidrografia.
+O Brasil Lens integra geografia territorial do IBGE com dados ambientais sobre clima, focos de calor, alertas de desastres naturais e hidrografia.
 
 ---
 
@@ -53,4 +53,3 @@ O backend utiliza uma instância interna do **Redis 7.4** (`redis:7.4-alpine`) o
 - **Leituras Meteorológicas:** Chaves expiradas por horário da própria leitura (15 a 30 minutos). Em caso de queda momentânea do provedor externo, a última leitura é servida como `stale` por até 12 horas.
 - **Metadados de Queimadas (INPE):** Cache compartilhado com TTL de 10 minutos com deduplicação de requisições concorrentes.
 - **Geometrias e Resumos:** Cache persistido com política `allkeys-lru` e limite de memória de 256 MB.
-

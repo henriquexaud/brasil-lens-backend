@@ -28,6 +28,7 @@ from app.core.config import settings
 from app.core.errors import DomainError, error_body
 from app.core.logging import configure_logging, get_logger
 from app.core.redis_cache import close as close_redis
+from app.core.redis_cache import purge_previous_cache_version
 from app.db.session import SessionFactory, dispose_engine
 from app.jobs import weather_scheduler
 from app.repositories.boundaries import municipality_areas, state_areas
@@ -54,6 +55,7 @@ async def _warm_up() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     logger.info("api.startup", extra={"environment": settings.app_env})
+    await purge_previous_cache_version()
     # Atualização periódica das fontes climáticas — ver
     # app/jobs/weather_scheduler.py sobre por que é um laço em processo e não
     # um cron externo.
@@ -73,10 +75,9 @@ app = FastAPI(
     title=settings.app_name,
     version="0.1.0",
     description=(
-        "Dados territoriais, demográficos e econômicos do Brasil.\n\n"
-        "Os dados são ingeridos de fontes públicas (IBGE) por jobs offline e "
-        "servidos a partir do PostgreSQL/PostGIS. O clima atual e a previsão são "
-        "consultados na Open-Meteo, com cache e tratamento de indisponibilidade."
+        "Clima e meio ambiente no território brasileiro.\n\n"
+        "A API combina dados territoriais do IBGE com clima, alertas, focos de "
+        "calor e hidrografia de fontes públicas."
     ),
     default_response_class=ORJSONResponse,
     lifespan=lifespan,
@@ -87,13 +88,10 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=False,
-    # As visualizações salvas são escritas pelo browser: sem POST/PUT/DELETE
-    # (e o OPTIONS do preflight) o CRUD falharia só no navegador, passando
-    # no curl — o modo mais confuso de quebrar.
+    # Os municípios acompanhados têm operações de escrita feitas pelo browser.
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
-    # Sem isto o `Location` do 201 existe na resposta mas é invisível para o
-    # JavaScript — um cabeçalho que só o curl enxerga não é contrato.
+    # Expõe Location para clientes que seguem o recurso criado.
     expose_headers=["Location"],
 )
 

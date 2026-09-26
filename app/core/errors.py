@@ -34,20 +34,6 @@ class TerritoryNotFoundError(NotFoundError):
         )
 
 
-class IndicatorNotFoundError(NotFoundError):
-    code = "indicator_not_found"
-
-    def __init__(self, key: str) -> None:
-        super().__init__(f"Indicador '{key}' não existe no catálogo.", indicator=key)
-
-
-class SavedViewNotFoundError(NotFoundError):
-    code = "saved_view_not_found"
-
-    def __init__(self, view_id: str) -> None:
-        super().__init__(f"Visualização '{view_id}' não existe.", viewId=view_id)
-
-
 class FollowedMunicipalityNotFoundError(NotFoundError):
     code = "followed_municipality_not_found"
 
@@ -63,13 +49,6 @@ class ConflictError(DomainError):
 
     status_code = 409
     code = "conflict"
-
-
-class SavedViewNameTakenError(ConflictError):
-    code = "saved_view_name_taken"
-
-    def __init__(self, name: str) -> None:
-        super().__init__(f"Já existe uma visualização chamada '{name}'.", name=name)
 
 
 class InvalidParameterError(DomainError):

@@ -1,13 +1,10 @@
-"""Caso de uso do mapa: recorte, indicador, ano e classificação.
+"""Caso de uso do mapa: malha territorial, política de LOD e cache.
 
-Onde ficam as regras que **não** pertencem nem ao SQL nem ao HTTP:
-
-* política de LOD por nível territorial;
-* proteção contra pedir 5.571 municípios detalhados de uma vez;
-* validação de compatibilidade entre `level` e `parent` (a forma da
-  hierarquia em si vive em `models/territory.py`, compartilhada com `/views`);
-* tradução de `latest` para um ano concreto;
-* normalização e classificação dos valores.
+Regras de negócio do mapa base:
+* política de LOD por nível territorial (overview vs detail);
+* validação de compatibilidade entre `level` e `parent`;
+* caching em memória local e no Redis da malha GeoJSON serializada;
+* bounding box do escopo territorial.
 """
 
 from __future__ import annotations
@@ -18,32 +15,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import redis_cache
 from app.core.cache import TTLCache
 from app.core.config import settings
-from app.core.errors import IndicatorNotFoundError, InvalidParameterError, TerritoryNotFoundError
+from app.core.errors import InvalidParameterError, TerritoryNotFoundError
 from app.core.logging import get_logger
 from app.models import EXPECTED_PARENT_LEVEL, REQUIRES_PARENT, GeometryLOD, TerritoryLevel
-from app.repositories import indicators as indicators_repo
 from app.repositories import map_projection as map_repo
 from app.repositories import territories as territories_repo
 from app.schemas.map import (
-    MapClassification,
     MapFeature,
     MapFeatureCollection,
     MapFeatureProperties,
-    MapIndicatorMeta,
     MapScope,
-    MapStatistics,
-    MapValue,
-    MapValuesResponse,
 )
-from app.services.classification import DEFAULT_CLASS_COUNT, describe
 
 logger = get_logger(__name__)
 
 # Política de detalhe: país e regiões usam a geometria mais agressiva. UFs e
-# municípios usam a intermediária — as fronteiras estaduais são desenhadas
-# também como contorno do estado aberto, onde a simplificação de `overview`
-# ficava visível. A canônica nunca é servida por aqui (ver `MapLod`).
-# Ver docs/ARCHITECTURE.md §5.
+# municípios usam a intermediária.
 _DEFAULT_LOD: dict[TerritoryLevel, GeometryLOD] = {
     TerritoryLevel.COUNTRY: GeometryLOD.OVERVIEW,
     TerritoryLevel.REGION: GeometryLOD.OVERVIEW,
@@ -55,12 +42,6 @@ _cache: TTLCache[MapFeatureCollection] = TTLCache(
     ttl_seconds=settings.read_cache_ttl_seconds,
     max_entries=settings.read_cache_max_entries,
 )
-_values_cache: TTLCache[MapValuesResponse] = TTLCache(
-    ttl_seconds=settings.read_cache_ttl_seconds,
-    max_entries=settings.read_cache_max_entries,
-)
-# A versão é relida a cada minuto: uma ingestão aparece no mapa (e muda o
-# ETag) sem que cada requisição consulte `ingestion_runs`.
 _version_cache: TTLCache[int] = TTLCache(ttl_seconds=60, max_entries=1)
 
 
@@ -70,12 +51,11 @@ def cache_stats() -> dict[str, int]:
 
 def clear_cache() -> None:
     _cache.clear()
-    _values_cache.clear()
     _version_cache.clear()
 
 
 async def data_version(session: AsyncSession) -> int:
-    """Versão dos dados do mapa: muda a cada ingestão de territórios, malhas ou valores."""
+    """Versão dos dados do mapa: muda a cada ingestão de territórios ou malhas."""
     cached = _version_cache.get("version")
     if cached is not None:
         return cached
@@ -88,25 +68,15 @@ def projection_key(
     *,
     level: TerritoryLevel,
     parent_code: str | None,
-    indicator_key: str | None,
-    year: str,
     lod: GeometryLOD | None,
-    classes: int,
     version: int,
 ) -> str:
-    """Identidade de uma projeção: chave do Redis e base do ETag.
-
-    Inclui a versão dos dados, para uma nova ingestão nunca ser servida (nem
-    revalidada com 304) a partir da resposta anterior.
-    """
+    """Identidade de uma projeção da malha: chave do Redis e base do ETag."""
     return ":".join(
         (
             level.value,
             parent_code or "root",
-            indicator_key or "none",
-            (year or "latest").strip().lower(),
             (lod or _DEFAULT_LOD[level]).value,
-            str(classes),
             str(version),
         )
     )
@@ -117,16 +87,10 @@ async def get_map(
     *,
     level: TerritoryLevel,
     parent_code: str | None = None,
-    indicator_key: str | None = None,
-    year: str = "latest",
     lod: GeometryLOD | None = None,
-    classes: int = DEFAULT_CLASS_COUNT,
     version: int | None = None,
 ) -> MapFeatureCollection:
-    requested_year = (year or "latest").strip()
-    target_year = _parse_year(requested_year)
     effective_lod = lod or _DEFAULT_LOD[level]
-
     _validate_scope(level, parent_code)
 
     if version is None:
@@ -134,10 +98,7 @@ async def get_map(
     redis_key = projection_key(
         level=level,
         parent_code=parent_code,
-        indicator_key=indicator_key,
-        year=requested_year,
         lod=effective_lod,
-        classes=classes,
         version=version,
     )
     cached = _cache.get(redis_key)
@@ -152,25 +113,12 @@ async def get_map(
 
     parent_id = await _resolve_parent(session, level, parent_code)
 
-    indicator_id: int | None = None
-    catalog_entry = None
-    if indicator_key:
-        catalog = await indicators_repo.list_catalog(session, level=level, key=indicator_key)
-        if not catalog:
-            raise IndicatorNotFoundError(indicator_key)
-        catalog_entry = catalog[0]
-        indicator_id = await indicators_repo.get_indicator_id(session, indicator_key)
-
     projection = await map_repo.fetch_map_projection(
         session,
         level=level,
         lod=effective_lod,
         parent_id=parent_id,
-        indicator_id=indicator_id,
-        year=target_year,
     )
-
-    distribution = describe([row.value for row in projection.features], classes=classes)
 
     features = [
         MapFeature(
@@ -182,12 +130,7 @@ async def get_map(
                 abbreviation=row.abbreviation,
                 parent_code=row.parent_ibge_code,
                 parent_name=row.parent_name,
-                value=row.value,
-                normalized_value=distribution.normalize(row.value),
-                class_index=distribution.class_index(row.value),
             ),
-            # O GeoJSON vem pronto do PostGIS; só é desserializado para virar
-            # parte da resposta. Nenhuma geometria é construída em Python.
             geometry=orjson.loads(row.geometry_json),
         )
         for row in projection.features
@@ -199,29 +142,6 @@ async def get_map(
             parent=parent_code,
             lod=effective_lod,
             count=len(features),
-        ),
-        indicator=(
-            MapIndicatorMeta(
-                key=catalog_entry.key,
-                name=catalog_entry.name,
-                unit=catalog_entry.unit,
-                decimal_places=catalog_entry.decimal_places,
-                year=projection.resolved_year,
-                requested_year=requested_year,
-                available_years=catalog_entry.available_years,
-            )
-            if catalog_entry is not None
-            else None
-        ),
-        statistics=(
-            MapStatistics.model_validate(distribution.statistics, from_attributes=True)
-            if distribution.statistics is not None
-            else None
-        ),
-        classification=(
-            MapClassification.model_validate(distribution.classification, from_attributes=True)
-            if distribution.classification is not None
-            else None
         ),
         bbox=_scope_bbox(projection.features),
         features=features,
@@ -250,184 +170,60 @@ async def get_map(
         extra={
             "level": level.value,
             "parent": parent_code,
-            "indicator": indicator_key,
-            "requested_year": requested_year,
-            "resolved_year": projection.resolved_year,
             "lod": effective_lod.value,
             "features": len(features),
-            "with_value": distribution.statistics.count if distribution.statistics else 0,
         },
     )
 
-    # Em memória, só projeções pequenas: não inflam o RSS do processo. No Redis
-    # (comprimido com zlib) cabem todas — MG ocupa ~500 KB — e isso poupa o
-    # custo do PostGIS também para as projeções municipais.
     if len(features) <= settings.read_cache_max_features:
         _cache.set(redis_key, response)
     await redis_cache.write("map-projection", redis_key, response, 86400)
     return response
 
 
-async def get_map_values(
-    session: AsyncSession,
-    *,
-    level: TerritoryLevel,
-    parent_code: str | None = None,
-    indicator_key: str,
-    year: str = "latest",
-    classes: int = DEFAULT_CLASS_COUNT,
-    version: int | None = None,
-) -> MapValuesResponse:
-    """Os valores de `get_map`, sem geometria: o cliente já tem a malha do escopo.
-
-    Mesma consulta, mesma resolução de `latest` e mesma classificação — só não
-    serializa a geometria, que é quase todo o peso da resposta.
-    """
-    requested_year = (year or "latest").strip()
-    target_year = _parse_year(requested_year)
-    _validate_scope(level, parent_code)
-    if version is None:
-        version = await data_version(session)
-    key = projection_key(
-        level=level,
-        parent_code=parent_code,
-        indicator_key=indicator_key,
-        year=requested_year,
-        lod=None,
-        classes=classes,
-        version=version,
-    )
-    if (cached := _values_cache.get(key)) is not None:
-        return cached
-    if (shared := await redis_cache.read("map-values", key, MapValuesResponse)) is not None:
-        _values_cache.set(key, shared)
-        return shared
-
-    parent_id = await _resolve_parent(session, level, parent_code)
-    catalog = await indicators_repo.list_catalog(session, level=level, key=indicator_key)
-    if not catalog:
-        raise IndicatorNotFoundError(indicator_key)
-    catalog_entry = catalog[0]
-    indicator_id = await indicators_repo.get_indicator_id(session, indicator_key)
-    projection = await map_repo.fetch_map_projection(
-        session,
-        level=level,
-        lod=_DEFAULT_LOD[level],
-        parent_id=parent_id,
-        indicator_id=indicator_id,
-        year=target_year,
-        with_geometry=False,
-    )
-    distribution = describe([row.value for row in projection.features], classes=classes)
-    response = MapValuesResponse(
-        level=level,
-        parent=parent_code,
-        indicator=MapIndicatorMeta(
-            key=catalog_entry.key,
-            name=catalog_entry.name,
-            unit=catalog_entry.unit,
-            decimal_places=catalog_entry.decimal_places,
-            year=projection.resolved_year,
-            requested_year=requested_year,
-            available_years=catalog_entry.available_years,
-        ),
-        statistics=(
-            MapStatistics.model_validate(distribution.statistics, from_attributes=True)
-            if distribution.statistics is not None
-            else None
-        ),
-        classification=(
-            MapClassification.model_validate(distribution.classification, from_attributes=True)
-            if distribution.classification is not None
-            else None
-        ),
-        values=[
-            MapValue(
-                ibge_code=row.ibge_code,
-                value=row.value,
-                normalized_value=distribution.normalize(row.value),
-                class_index=distribution.class_index(row.value),
-            )
-            for row in projection.features
-        ],
-    )
-    _values_cache.set(key, response)
-    await redis_cache.write("map-values", key, response, 86400)
-    return response
-
-
-def _parse_year(requested: str) -> int | None:
-    """`latest` → None (resolvido no SQL); ano numérico → int."""
-    if requested.lower() == "latest":
+def _scope_bbox(
+    features: list[map_repo.MapFeatureRow],
+) -> tuple[float, float, float, float] | None:
+    """Bounding box que engloba todas as features do escopo."""
+    w_list = [f.bbox[0] for f in features if f.bbox[0] is not None]
+    s_list = [f.bbox[1] for f in features if f.bbox[1] is not None]
+    e_list = [f.bbox[2] for f in features if f.bbox[2] is not None]
+    n_list = [f.bbox[3] for f in features if f.bbox[3] is not None]
+    if not (w_list and s_list and e_list and n_list):
         return None
-    try:
-        parsed = int(requested)
-    except ValueError as exc:
-        raise InvalidParameterError(
-            "O parâmetro 'year' aceita um ano (ex.: 2022) ou 'latest'.",
-            parameter="year",
-            received=requested,
-        ) from exc
-    if not 1900 <= parsed <= 2100:
-        raise InvalidParameterError(
-            "O parâmetro 'year' deve estar entre 1900 e 2100.",
-            parameter="year",
-            received=requested,
-        )
-    return parsed
+    return (min(w_list), min(s_list), max(e_list), max(n_list))
 
 
 def _validate_scope(level: TerritoryLevel, parent_code: str | None) -> None:
     if level in REQUIRES_PARENT and not parent_code:
         raise InvalidParameterError(
-            f"O nível '{level.value}' exige o parâmetro 'parent' "
-            "(ex.: parent=35 para os municípios de São Paulo). "
-            "A restrição existe para não transferir a malha municipal inteira do país.",
-            parameter="parent",
+            f"O nível territorial '{level.value}' exige o parâmetro 'parent'.",
+            level=level.value,
+            required="parent",
         )
     if level is TerritoryLevel.COUNTRY and parent_code:
-        # Sem esta checagem o filtro por pai simplesmente não casa e a resposta
-        # sai 200 com zero features — um erro de uso virando silêncio.
         raise InvalidParameterError(
-            "O nível 'country' é a raiz da hierarquia e não aceita 'parent'.",
-            parameter="parent",
+            f"O nível territorial '{level.value}' não aceita o parâmetro 'parent'.",
+            level=level.value,
+            unexpected="parent",
         )
 
 
 async def _resolve_parent(
-    session: AsyncSession,
-    level: TerritoryLevel,
-    parent_code: str | None,
+    session: AsyncSession, level: TerritoryLevel, parent_code: str | None
 ) -> int | None:
     if not parent_code:
         return None
-
+    expected_level = EXPECTED_PARENT_LEVEL.get(level)
     parent_level = await territories_repo.get_level_by_code(session, parent_code)
     if parent_level is None:
         raise TerritoryNotFoundError(parent_code)
-
-    expected = EXPECTED_PARENT_LEVEL.get(level)
-    if expected is not None and parent_level != expected:
+    if expected_level and parent_level != expected_level:
         raise InvalidParameterError(
-            f"Para 'level={level.value}', 'parent' deve ser um território de nível "
-            f"'{expected.value}', mas '{parent_code}' é '{parent_level.value}'.",
-            parameter="parent",
+            f"Território pai '{parent_code}' tem nível '{parent_level.value}', "
+            f"mas '{level.value}' exige pai de nível '{expected_level.value}'.",
+            parent=parent_code,
+            parent_level=parent_level.value,
+            expected_parent_level=expected_level.value,
         )
-
     return await territories_repo.get_id_by_code(session, parent_code)
-
-
-def _scope_bbox(
-    rows: list[map_repo.MapFeatureRow],
-) -> tuple[float, float, float, float] | None:
-    """Extensão do escopo, agregada dos bbox gravados na ingestão.
-
-    Permite ao cliente dar `fitBounds` sem varrer coordenadas no browser.
-    """
-    wests = [row.bbox[0] for row in rows if row.bbox[0] is not None]
-    souths = [row.bbox[1] for row in rows if row.bbox[1] is not None]
-    easts = [row.bbox[2] for row in rows if row.bbox[2] is not None]
-    norths = [row.bbox[3] for row in rows if row.bbox[3] is not None]
-    if not (wests and souths and easts and norths):
-        return None
-    return (min(wests), min(souths), max(easts), max(norths))

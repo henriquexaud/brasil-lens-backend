@@ -1,11 +1,7 @@
-"""Camada meteorológica — estações e alertas, não-territoriais.
+"""Estações meteorológicas, leituras e alertas.
 
-Diferente de `territories`/`indicator_values`, um dado aqui não nasce em um
-polígono do IBGE: nasce num ponto (estação) ou numa área desenhada pela fonte
-(alerta). Forçar isso em `indicator_values` — PK
-`(territory_id, indicator_id, reference_year)` — seria o erro que
-`docs/ARCHITECTURE.md` §8.3 já preveniu: essa tabela assume território e ano
-inteiro, e uma leitura horária de estação não tem nenhum dos dois.
+Uma leitura nasce num ponto (estação) e um alerta pode cobrir uma área; ambos
+possuem identidade, tempo e geografia próprios.
 
 `datasets` e `ingestion_runs` são reaproveitados sem alteração: proveniência e
 frescor por fonte já são exatamente o que essas tabelas registram.
@@ -103,9 +99,8 @@ class WeatherStation(Base, TimestampMixin):
 class WeatherObservation(Base, TimestampMixin):
     """Uma leitura de uma estação, num instante.
 
-    PK `(station_id, observed_at)`: mesma lógica de idempotência natural que
-    `indicator_values` já usa — o job pode reexecutar sobre o mesmo intervalo
-    sem duplicar linha, só atualizar `updated_at`.
+    PK `(station_id, observed_at)`: o job pode reexecutar sobre o mesmo
+    intervalo sem duplicar linha, só atualizar `updated_at`.
     """
 
     __tablename__ = "weather_observations"

@@ -1,10 +1,4 @@
-"""Rotas do painel de clima — sem `level`/`parent`/`indicator`/`year`.
-
-Diferente de `/map`, este contexto não é uma coropleta territorial: são
-camadas independentes (estações, alertas), cada uma sua própria requisição —
-mesmo desenho que `docs/ARCHITECTURE.md` §8.3 já previa para "camadas
-temáticas que façam sentido sobrepor".
-"""
+"""Rotas de clima — observações e alertas consultados por recorte geográfico."""
 
 from typing import Annotated
 
