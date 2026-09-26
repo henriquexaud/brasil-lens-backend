@@ -122,11 +122,6 @@ class Settings(BaseSettings):
             return [origin.strip() for origin in value.split(",") if origin.strip()]
         return value
 
-    @property
-    def sync_database_url(self) -> str:
-        """URL síncrona — usada só por ferramentas que não falam asyncpg."""
-        return self.database_url.replace("+asyncpg", "+psycopg")
-
 
 @lru_cache
 def get_settings() -> Settings:

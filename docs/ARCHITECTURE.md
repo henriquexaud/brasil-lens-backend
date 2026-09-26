@@ -6,9 +6,11 @@ A API é um monólito modular: `providers` convertem fontes externas em registro
 
 `territories` mantém país, regiões, estados e municípios numa hierarquia única, relacionada por `parent_id`. `ibge_code` preserva os códigos oficiais. As colunas `bbox_*` aceleram o enquadramento do mapa e os índices normalizados apoiam busca sem acentos.
 
-`territory_geometries` guarda as malhas canônicas do IBGE e duas simplificações (`overview`, `detail`). A API serve apenas as geometrias simplificadas; o PostGIS usa GiST para consultas espaciais, como viewport e localização por ponto.
+`territory_geometries` guarda as malhas canônicas do IBGE e duas simplificações (`overview`, `detail`). `/map` serve as geometrias simplificadas; a consulta paginada de limites municipais pode servir a malha canônica. O PostGIS usa GiST para consultas espaciais, como viewport e localização por ponto.
 
 Essas tabelas são necessárias à experiência climática e permanecem compartilhadas por busca, navegação, foco de município e camadas ambientais.
+
+A projeção do mapa retorna diretamente as linhas geográficas, sem um objeto intermediário de indicador/ano. O território pai é validado e resolvido em uma única consulta. Detalhes territoriais são montados diretamente no contrato `TerritoryDetail`.
 
 ## Fontes e dados ambientais
 

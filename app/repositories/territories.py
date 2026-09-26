@@ -123,9 +123,13 @@ async def get_weather_point(session: AsyncSession, ibge_code: str) -> tuple[floa
     return (float(row[0]), float(row[1])) if row else None
 
 
-async def get_id_by_code(session: AsyncSession, ibge_code: str) -> int | None:
-    stmt = select(Territory.id).where(Territory.ibge_code == ibge_code)
-    return (await session.execute(stmt)).scalar_one_or_none()
+async def get_identity_by_code(
+    session: AsyncSession, ibge_code: str
+) -> tuple[int, TerritoryLevel] | None:
+    """Resolve o ID interno e o nível em uma consulta, sem carregar relações."""
+    stmt = select(Territory.id, Territory.level).where(Territory.ibge_code == ibge_code)
+    row = (await session.execute(stmt)).first()
+    return (row.id, row.level) if row is not None else None
 
 
 async def get_level_by_code(session: AsyncSession, ibge_code: str) -> TerritoryLevel | None:

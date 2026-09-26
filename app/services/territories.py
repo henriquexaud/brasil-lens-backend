@@ -66,20 +66,19 @@ async def list_territories(
     )
 
 
-async def _detail_fields(
-    session: AsyncSession,
-    row: territories_repo.TerritoryRow,
-) -> dict[str, object]:
-    """Campos de `TerritoryDetail`."""
+async def get_detail(session: AsyncSession, ibge_code: str) -> TerritoryDetail:
+    row = await territories_repo.get_by_code(session, ibge_code)
+    if row is None:
+        raise TerritoryNotFoundError(ibge_code)
     children_count, children_level = await territories_repo.children_summary(session, row.ibge_code)
     summary = _summary(row)
-    return {
-        "ibge_code": summary.ibge_code,
-        "name": summary.name,
-        "level": summary.level,
-        "abbreviation": summary.abbreviation,
-        "parent": summary.parent,
-        "capital": (
+    return TerritoryDetail(
+        ibge_code=summary.ibge_code,
+        name=summary.name,
+        level=summary.level,
+        abbreviation=summary.abbreviation,
+        parent=summary.parent,
+        capital=(
             TerritoryRef(
                 ibge_code=row.capital_ibge_code,
                 name=row.capital_name or "",
@@ -88,17 +87,10 @@ async def _detail_fields(
             if row.capital_ibge_code
             else None
         ),
-        "children_count": children_count,
-        "children_level": children_level,
-        "bbox": row.bbox,
-    }
-
-
-async def get_detail(session: AsyncSession, ibge_code: str) -> TerritoryDetail:
-    row = await territories_repo.get_by_code(session, ibge_code)
-    if row is None:
-        raise TerritoryNotFoundError(ibge_code)
-    return TerritoryDetail(**await _detail_fields(session, row))
+        children_count=children_count,
+        children_level=children_level,
+        bbox=row.bbox,
+    )
 
 
 async def locate_territory(

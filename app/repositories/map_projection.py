@@ -28,47 +28,28 @@ class MapFeatureRow:
     bbox: tuple[float | None, float | None, float | None, float | None]
 
 
-@dataclass(slots=True)
-class MapProjection:
-    features: list[MapFeatureRow]
-
-
 _MAP_SQL = text(
     """
-    WITH scope AS (
-        SELECT t.id,
-               t.ibge_code,
-               t.name,
-               t.level::text      AS level,
-               t.abbreviation,
-               t.bbox_west,
-               t.bbox_south,
-               t.bbox_east,
-               t.bbox_north,
-               p.ibge_code        AS parent_ibge_code,
-               p.name             AS parent_name
-          FROM territories t
-          LEFT JOIN territories p ON p.id = t.parent_id
-         WHERE t.level = CAST(:level AS territory_level)
-           AND (CAST(:parent_id AS integer) IS NULL
-                OR t.parent_id = CAST(:parent_id AS integer))
-    )
-    SELECT s.ibge_code,
-           s.name,
-           s.level,
-           s.abbreviation,
-           s.parent_ibge_code,
-           s.parent_name,
-           s.bbox_west,
-           s.bbox_south,
-           s.bbox_east,
-           s.bbox_north,
+    SELECT t.ibge_code,
+           t.name,
+           t.level::text AS level,
+           t.abbreviation,
+           p.ibge_code AS parent_ibge_code,
+           p.name AS parent_name,
+           t.bbox_west,
+           t.bbox_south,
+           t.bbox_east,
+           t.bbox_north,
            ST_AsGeoJSON(g.geom) AS geometry_json
-      FROM scope s
+      FROM territories t
+      LEFT JOIN territories p ON p.id = t.parent_id
       JOIN territory_geometries g
-             ON g.territory_id = s.id
+             ON g.territory_id = t.id
             AND g.lod = CAST(:lod AS geometry_lod)
-     ORDER BY s.name
+     WHERE t.level = CAST(:level AS territory_level)
+       AND (CAST(:parent_id AS integer) IS NULL
+            OR t.parent_id = CAST(:parent_id AS integer))
+     ORDER BY t.name
     """
 )
 
@@ -79,7 +60,7 @@ async def fetch_map_projection(
     level: TerritoryLevel,
     lod: GeometryLOD,
     parent_id: int | None = None,
-) -> MapProjection:
+) -> list[MapFeatureRow]:
     """Executa a projeção da malha territorial para o mapa."""
     result = await session.execute(
         _MAP_SQL,
@@ -90,7 +71,7 @@ async def fetch_map_projection(
         },
     )
 
-    features: list[MapFeatureRow] = [
+    return [
         MapFeatureRow(
             ibge_code=row.ibge_code,
             name=row.name,
@@ -103,8 +84,6 @@ async def fetch_map_projection(
         )
         for row in result
     ]
-
-    return MapProjection(features=features)
 
 
 _SINGLE_FEATURE_SQL = text(

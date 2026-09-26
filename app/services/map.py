@@ -113,7 +113,7 @@ async def get_map(
 
     parent_id = await _resolve_parent(session, level, parent_code)
 
-    projection = await map_repo.fetch_map_projection(
+    rows = await map_repo.fetch_map_projection(
         session,
         level=level,
         lod=effective_lod,
@@ -133,7 +133,7 @@ async def get_map(
             ),
             geometry=orjson.loads(row.geometry_json),
         )
-        for row in projection.features
+        for row in rows
     ]
 
     response = MapFeatureCollection(
@@ -143,7 +143,7 @@ async def get_map(
             lod=effective_lod,
             count=len(features),
         ),
-        bbox=_scope_bbox(projection.features),
+        bbox=_scope_bbox(rows),
         features=features,
     )
 
@@ -215,9 +215,10 @@ async def _resolve_parent(
     if not parent_code:
         return None
     expected_level = EXPECTED_PARENT_LEVEL.get(level)
-    parent_level = await territories_repo.get_level_by_code(session, parent_code)
-    if parent_level is None:
+    parent = await territories_repo.get_identity_by_code(session, parent_code)
+    if parent is None:
         raise TerritoryNotFoundError(parent_code)
+    parent_id, parent_level = parent
     if expected_level and parent_level != expected_level:
         raise InvalidParameterError(
             f"Território pai '{parent_code}' tem nível '{parent_level.value}', "
@@ -226,4 +227,4 @@ async def _resolve_parent(
             parent_level=parent_level.value,
             expected_parent_level=expected_level.value,
         )
-    return await territories_repo.get_id_by_code(session, parent_code)
+    return parent_id
