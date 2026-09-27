@@ -1,9 +1,3 @@
-"""Contrato do endpoint de hidrografia (rios, lagos e corpos d'água).
-
-GeoJSON FeatureCollection válido trazendo cursos d'água lineares e massas d'água
-poligonais com propriedades padronizadas da Agência Nacional de Águas (ANA / SNIRH).
-"""
-
 from __future__ import annotations
 
 from typing import Any, Literal

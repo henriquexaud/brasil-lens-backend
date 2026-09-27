@@ -1,10 +1,3 @@
-"""Interpolação espacial de dados climáticos (IDW) no backend.
-
-Calcula estimativas suaves de temperatura, umidade e precipitação para municípios
-não medidos com base em estações/amostras reais, reduzindo tráfego de rede e
-processamento no cliente.
-"""
-
 from __future__ import annotations
 
 import math
@@ -13,7 +6,6 @@ from app.schemas.weather import WeatherCity
 
 
 def _geo_dist_sq(lat1: float, lon1: float, lat2: float, lon2: float, cos_lat: float) -> float:
-    """Distância ao quadrado considerando curvatura da Terra aproximada local."""
     d_lat = lat1 - lat2
     d_lon = (lon1 - lon2) * cos_lat
     return d_lat * d_lat + d_lon * d_lon
@@ -27,7 +19,6 @@ def interpolate_municipal_weather(
     measured_cities: list[WeatherCity],
     state_abbr: str,
 ) -> WeatherCity:
-    """Estima as condições de um município com base nos k vizinhos mais próximos via IDW."""
     if not measured_cities:
         raise ValueError("Nenhuma cidade medida disponível para interpolação.")
 
@@ -119,8 +110,6 @@ def interpolate_municipal_weather(
         state_abbreviation=state_abbr or closest_city.state_abbreviation,
         latitude=target_lat,
         longitude=target_lon,
-        # Fuso e horário vêm da medição mais próxima: a estimativa não é mais
-        # recente que ela, e vários estados não estão no fuso de Brasília.
         timezone=closest_city.timezone,
         observed_at=closest_city.observed_at,
         temperature_c=round(est_temp, 1),
@@ -134,7 +123,6 @@ def interpolate_municipal_weather(
         precipitation_48h_mm=(
             round(weighted_rain_48h / total_weight, 1) if has_rain_48h and total_weight else None
         ),
-        # Chuva agora é local: a estimativa segue a medição mais próxima, não a média.
         raining_now=closest_city.raining_now,
         weather_code=closest_city.weather_code or 0,
         forecast=[],

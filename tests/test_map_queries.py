@@ -1,5 +1,3 @@
-"""Consultas territoriais que alimentam o mapa climático."""
-
 from __future__ import annotations
 
 from collections.abc import AsyncIterator

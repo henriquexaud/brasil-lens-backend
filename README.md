@@ -79,5 +79,3 @@ uvicorn app.main:app --reload
 ```
 
 A suíte inclui testes unitários e testes `db` com PostgreSQL/PostGIS; alguns exigem territórios ingeridos. `pytest -q -m 'not db'` executa somente os testes sem banco. A [documentação de desenvolvimento](docs/DEVELOPMENT.md) e o [guia de ingestão](docs/DATA_INGESTION.md) detalham esses fluxos.
-
-A [revisão do projeto](docs/PROJECT_REVIEW.md) reúne diagnóstico, prioridades, matriz de requisitos do MVP e resultados de validação.

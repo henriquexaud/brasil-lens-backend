@@ -1,5 +1,3 @@
-"""Testes do serviço e contrato de hidrografia (rios e massas d'água)."""
-
 from unittest.mock import AsyncMock
 
 import httpx
@@ -90,10 +88,8 @@ def test_consolidate_river_segments_groups_into_complete_rivers() -> None:
     raw = mock_ana_rivers_payload()["features"]
     consolidated = service._consolidate_river_segments(raw)
 
-    # 2 trechos do Rio Amazonas + 1 trecho do Rio Tietê devem virar 2 rios consolidados
     assert len(consolidated) == 2
 
-    # Priorização por porte hidrológico (Amazonas > Tietê)
     amazonas = consolidated[0]
     assert amazonas.properties.name == "Rio Amazonas"
     assert amazonas.properties.drainage_area_km2 == 6042610.0
@@ -110,10 +106,8 @@ def test_consolidate_river_segments_groups_into_complete_rivers() -> None:
 def test_major_rivers_snapshot_loaded_and_sorted() -> None:
     major_rivers = service._init_major_rivers()
     assert len(major_rivers) >= 50
-    # O primeiro deve ser o Rio Amazonas
     assert major_rivers[0].properties.name == "Rio Amazonas"
     assert (major_rivers[0].properties.drainage_area_km2 or 0) > 5000000
-    # Todos devem ser MultiLineString e ter bounding box
     for r in major_rivers:
         assert r.geometry["type"] == "MultiLineString"
         assert r.bbox is not None
@@ -128,7 +122,6 @@ async def test_country_only_returns_major_axes_with_reduced_geometry() -> None:
     assert 0 < result.metadata.river_count < len(service._MAJOR_RIVERS)
     assert len(result.model_dump_json()) < 200000
     assert all((feature.properties.drainage_area_km2 or 0) >= 200000 for feature in result.features)
-    # Eixos principais persistem, tributários menores esperam o zoom.
     names = {f.properties.name for f in result.features}
     assert "Rio São Francisco" in names
     assert "Rio Paraná" in names
@@ -137,7 +130,6 @@ async def test_country_only_returns_major_axes_with_reduced_geometry() -> None:
 
 def test_viewport_clipping_and_simplification_preserve_crossing_rivers():
     bbox = (0, 0, 1, 1)
-    # Nenhum vértice dentro: o segmento ainda cruza o viewport e deve aparecer.
     assert service._clip_line([[-1, 0.5], [2, 0.5]], bbox) == [[[0, 0.5], [1, 0.5]]]
     assert service._clip_line([[-1, -1], [-2, -2]], bbox) == []
     points = [[0, 0], [0.25, 0.001], [0.5, 0], [0.75, -0.001], [1, 0]]
@@ -155,7 +147,6 @@ def test_zoom_filters_reduce_tributaries_and_small_lakes_at_country_scale():
 
 
 async def test_ana_outage_pauses_calls_and_serves_partial_snapshot(monkeypatch) -> None:
-    """Com a ANA fora do ar, outro recorte não espera um novo timeout: sai do snapshot."""
     rivers = AsyncMock(side_effect=httpx.ConnectError("ANA fora do ar"))
     bodies = AsyncMock(return_value=[])
     monkeypatch.setattr(service, "_fetch_rivers", rivers)
@@ -184,7 +175,6 @@ async def test_national_scale_shares_one_cache_entry_for_any_framing(monkeypatch
     assert first is second
     assert bodies.call_count == 1
     assert first.bbox == service.BRAZIL_BBOX
-    # A mesma entrada que o startup aquece.
     await service.warm_up(AsyncMock())
     assert bodies.call_count == 1
     service._cache.clear()

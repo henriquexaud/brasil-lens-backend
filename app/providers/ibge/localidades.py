@@ -1,11 +1,3 @@
-"""Provider da API IBGE Localidades — hierarquia e nomes oficiais.
-
-`https://servicodados.ibge.gov.br/api/v1/localidades`
-
-Esta é a fonte dos nomes e códigos territoriais que relacionam as geometrias
-com municípios, estados e regiões.
-"""
-
 from __future__ import annotations
 
 from typing import Any
@@ -26,8 +18,6 @@ DATASET_CODE = "localidades/v1"
 DATASET_NAME = "IBGE — Divisão Territorial Brasileira (API Localidades v1)"
 DATASET_URL = "https://servicodados.ibge.gov.br/api/docs/localidades"
 
-# O IBGE não define código para o país; "BR" é o identificador que usamos no
-# nível raiz e é o mesmo token aceito pela API de malhas (/malhas/paises/BR).
 COUNTRY_CODE = "BR"
 COUNTRY_NAME = "Brasil"
 
@@ -46,8 +36,6 @@ class _RawState(BaseModel):
 
 
 class _RawMunicipalityState(BaseModel):
-    """Recorte de `municipio.microrregiao.mesorregiao.UF` usado para achar a UF."""
-
     id: int
     sigla: str
 
@@ -75,8 +63,6 @@ class _RawImmediateRegion(BaseModel):
 class _RawMunicipality(BaseModel):
     id: int
     nome: str
-    # O IBGE expõe a UF por dois caminhos (divisão antiga e nova). Aceitamos
-    # qualquer um dos dois: municípios novos às vezes só trazem um deles.
     microrregiao: _RawMicroregion | None = None
     regiao_imediata: _RawImmediateRegion | None = Field(default=None, alias="regiao-imediata")
 
@@ -131,7 +117,6 @@ async def fetch_states(client: httpx.AsyncClient) -> list[TerritoryRecord]:
 
 
 async def fetch_municipalities(client: httpx.AsyncClient) -> list[TerritoryRecord]:
-    """Todos os municípios do país em uma requisição (~5.570 registros)."""
     payload = await _get(client, "/api/v1/localidades/municipios")
     municipalities = [_RawMunicipality.model_validate(item) for item in payload]
     return [

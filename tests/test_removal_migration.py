@@ -1,5 +1,3 @@
-"""A remoção do domínio antigo deve preservar a base geográfica e ambiental."""
-
 import pytest
 from sqlalchemy import inspect, text
 
@@ -41,7 +39,6 @@ async def test_migration_removes_exclusive_data_and_preserves_shared_references(
             getattr(migration, direction)()
 
     try:
-        # Restore the old schema inside this transaction to exercise both directions.
         await session.run_sync(migrate, "downgrade")
         indexes = await session.run_sync(
             lambda s: inspect(s.connection()).get_indexes("indicator_values")

@@ -1,16 +1,3 @@
-"""Importa os alertas de risco geo-hidrológico ativos do CEMADEN.
-
-`python -m app.jobs.import_weather_cemaden_alerts`
-
-Mesmo formato de `import_weather_inmet_alerts.py`: uma única requisição WFS
-(`GetFeature`) já devolve todos os alertas em vigor, sem N+1. O UPSERT é o
-mesmo dos dois jobs, em `_weather_alerts.py` — só o `provider` muda.
-
-Ver `app/providers/cemaden/alerts.py` para o contrato da fonte e as decisões
-de normalização (evento sem o sufixo de nível, expiração derivada de
-`vigencia`, `status=1` como filtro de "ainda ativo").
-"""
-
 from __future__ import annotations
 
 from app.core.config import settings

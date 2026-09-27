@@ -1,5 +1,3 @@
-"""Frescor público e proveniência devem refletir a última ingestão concluída."""
-
 from datetime import UTC, datetime, timedelta
 
 import pytest

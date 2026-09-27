@@ -1,11 +1,3 @@
-"""Base declarativa do SQLAlchemy 2.0.
-
-A convenção de nomes garante que constraints e índices criados pelos modelos e
-pelas migrations tenham exatamente o mesmo nome — sem isso, o autogenerate do
-Alembic produz diffs falsos e `DROP CONSTRAINT` fica dependente do nome sorteado
-pelo PostgreSQL.
-"""
-
 from datetime import datetime
 
 from sqlalchemy import MetaData, func
@@ -26,8 +18,6 @@ class Base(DeclarativeBase):
 
 
 class TimestampMixin:
-    """`created_at` responde "quando importamos"; `updated_at`, "quando revimos"."""
-
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True),
         server_default=func.now(),

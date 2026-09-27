@@ -1,5 +1,3 @@
-"""O caso de uso de localização preserva a ausência e o detalhe territorial."""
-
 from unittest.mock import AsyncMock
 
 import pytest

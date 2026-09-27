@@ -1,11 +1,3 @@
-"""Contrato real do WFS do CEMADEN e as decisões de normalização do provider.
-
-Payload de exemplo copiado de uma chamada real a
-`GET .../geoserver/cemaden_dev/ows?service=WFS&request=GetFeature&
-typeName=cemaden_dev:alertas_vigentes_siaden` — ver docstring de
-`app/providers/cemaden/alerts.py`.
-"""
-
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -50,15 +42,12 @@ def test_parses_real_contract() -> None:
     assert record is not None
     assert record.provider == "cemaden"
     assert record.external_id == "35454"
-    # O sufixo " - Moderado" some: nivel já cobre isso em `severity`.
     assert record.event == "Movimentos de Massa"
     assert record.severity == "Moderado"
     assert record.color == "#FFFF00"
     assert record.description == "BLUMENAU/SC"
     assert record.affected_ibge_codes == ("4202404",)
     assert record.onset == datetime(2026, 9, 20, 8, 7, 29, 832000, tzinfo=UTC)
-    # Sem data de expiração confiável na fonte (ver docstring do módulo):
-    # expira a partir de quando ESTE fetch rodou, mais o buffer configurado.
     assert record.expires == _FETCHED_AT + timedelta(
         seconds=settings.cemaden_alert_validity_buffer_seconds
     )
@@ -70,8 +59,6 @@ def test_parses_real_contract() -> None:
 
 
 def test_event_without_matching_level_suffix_is_kept_whole() -> None:
-    # "evento" pode não trazer o sufixo esperado — nesse caso não cortamos
-    # nada às cegas.
     record = alerts._to_alert(_feature(evento="Risco Hidrológico", nivel="Alto"), _FETCHED_AT)
     assert record is not None
     assert record.event == "Risco Hidrológico"

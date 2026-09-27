@@ -1,9 +1,3 @@
-"""Healthchecks.
-
-`/health` responde sem tocar o banco (liveness). `/health/ready` verifica banco
-e PostGIS (readiness) — é o que um orquestrador deve usar para decidir tráfego.
-"""
-
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Response, status

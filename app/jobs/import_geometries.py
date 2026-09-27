@@ -1,31 +1,3 @@
-"""Importa as malhas territoriais oficiais e gera os LODs de visualização.
-
-`python -m app.jobs.import_geometries [--skip-municipalities] [--states 35,31]`
-
-É aqui que mora a decisão de performance mais importante do produto: **toda a
-simplificação geométrica acontece nesta ingestão**, nunca em tempo de
-requisição. A malha municipal de Minas Gerais tem 8,8 MB e 401.746 vértices na
-qualidade máxima; nenhum endpoint pode pagar esse custo por requisição.
-
-Pipeline por território:
-
-1. baixar a malha canônica (`qualidade=maxima`);
-2. normalizar para `MultiPolygon` válido e gravar como LOD `canonical`;
-3. derivar `overview` e `detail` com `ST_SimplifyPreserveTopology`;
-4. gravar o bounding box em `territories`, para o drill-down do mapa não
-   precisar ler geometria.
-
-**Idempotência** vem da PK `(territory_id, lod)`: reexecutar sobrescreve a
-geometria do mesmo território/LOD.
-
-Limitação conhecida e aceita: a simplificação é feita por feature, então
-fronteiras compartilhadas entre vizinhos podem divergir em frações de pixel. Nas
-tolerâncias usadas (2 km na visão do país, 200 m na visão de estado) o desvio
-fica abaixo de 1 pixel nos zooms correspondentes. Se for preciso simplificar
-mais agressivamente, o próximo passo é simplificação topológica entre features
-(mapshaper/PostGIS Topology) ou vector tiles — não é necessário no MVP.
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -52,14 +24,11 @@ logger = get_logger(__name__)
 
 JOB_NAME = "import_geometries"
 
-# LODs derivados e suas tolerâncias (em graus, SRID 4326).
 _DERIVED_LODS: dict[GeometryLOD, float] = {
     GeometryLOD.OVERVIEW: settings.geometry_overview_tolerance,
     GeometryLOD.DETAIL: settings.geometry_detail_tolerance,
 }
 
-# ST_MakeValid + ST_Multi + ST_CollectionExtract(..,3) garantem MultiPolygon
-# válido: a malha do IBGE mistura Polygon e MultiPolygon na mesma resposta.
 _UPSERT_CANONICAL_SQL = text(
     """
     WITH source AS (
@@ -87,10 +56,6 @@ _UPSERT_CANONICAL_SQL = text(
     """
 )
 
-# Simplificação em conjunto (set-based), por nível territorial.
-# O CASE é uma proteção real: simplificar uma ilha muito pequena pode produzir
-# geometria vazia, e um município que desaparece do mapa é um bug visível.
-# Nesse caso mantemos a geometria canônica.
 _DERIVE_LOD_SQL = text(
     """
     WITH simplified AS (
@@ -132,7 +97,6 @@ _DERIVE_LOD_SQL = text(
     """
 )
 
-# bbox gravado a partir da geometria canônica (extensão verdadeira).
 _UPDATE_BBOX_SQL = text(
     """
     UPDATE territories t
@@ -158,10 +122,6 @@ _UPDATE_BBOX_SQL = text(
     """
 )
 
-# Territórios sem geometria canônica. Isso acontece de verdade: municípios
-# recém-criados aparecem na API Localidades antes de entrarem na malha
-# territorial. O mapa simplesmente não os desenha (INNER JOIN na geometria), e
-# esconder o fato tornaria a lacuna invisível — por isso ela é reportada.
 _MISSING_GEOMETRY_SQL = text(
     """
     SELECT t.ibge_code, t.name, t.level::text AS level
@@ -215,8 +175,6 @@ async def _store_canonical(
         if affected_rows(result):
             written += 1
         else:
-            # Geometria sem território correspondente: indica que
-            # import_territories não rodou ou está desatualizado.
             report.record_failure(f"geometry:{record.ibge_code}", "território inexistente no banco")
             report.failed += 1
     await session.commit()
@@ -259,11 +217,6 @@ async def _import_municipalities(
     quality: malhas.Quality,
     report: RunReport,
 ) -> int:
-    """Baixa a malha municipal UF por UF, com concorrência limitada.
-
-    A concorrência é limitada de propósito: cada resposta chega a ~9 MB, então
-    baixar tudo de uma vez custaria centenas de MB de memória sem ganho real.
-    """
     written = 0
     batch_size = max(1, settings.ibge_max_concurrency)
 
@@ -278,8 +231,6 @@ async def _import_municipalities(
         )
         for code, result in zip(batch, results, strict=True):
             if isinstance(result, BaseException):
-                # Uma UF que falha não invalida as demais: o run termina
-                # como 'partial' e o escopo falho fica registrado.
                 report.record_failure(f"state:{code}", str(result))
                 report.failed += 1
                 continue
@@ -337,7 +288,6 @@ async def main() -> int:
         await session.commit()
 
         async with http_client() as client:
-            # País, regiões e UFs: três requisições pequenas.
             for level in (TerritoryLevel.COUNTRY, TerritoryLevel.REGION, TerritoryLevel.STATE):
                 try:
                     records = await _fetch_level(client, level, options.quality)
@@ -388,7 +338,6 @@ async def _fetch_level(
     level: TerritoryLevel,
     quality: malhas.Quality,
 ) -> list[GeometryRecord]:
-    """Busca a malha do nível pedido. O país devolve uma feature; os outros, várias."""
     if level is TerritoryLevel.COUNTRY:
         return [await malhas.fetch_country(client, quality)]
     if level is TerritoryLevel.REGION:

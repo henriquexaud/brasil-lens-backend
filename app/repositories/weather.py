@@ -1,11 +1,3 @@
-"""Consultas da camada meteorológica — sem escopo territorial, de propósito.
-
-Ao contrário de `map_projection.py`, não há `level`/`parent`: uma estação ou
-um alerta não pertence a um recorte de território, então não existe "escopo"
-a resolver aqui — só "o estado atual" (última leitura por estação; alertas
-ainda válidos).
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -29,8 +21,6 @@ class StationRow:
     humidity_pct: Decimal | None
     pressure_hpa: Decimal | None
     precipitation_mm: Decimal | None
-    # GeoJSON ainda como texto — mesma decisão de `map_projection.py`: quem
-    # serializa decide quando desserializar.
     geometry_json: str
 
 
@@ -56,11 +46,6 @@ class SourceStatusRow:
     status: str
     started_at: datetime
     finished_at: datetime | None
-    # `ingestion_runs.details` — usado para distinguir "rodou e não achou
-    # nada porque não há nada" (ex.: zero alertas ativos, estado real) de
-    # "rodou mas não está de fato produzindo dado" (ver `services/weather.py`
-    # sobre o INMET: o job termina com sucesso mesmo quando a fonte de
-    # leitura por estação não devolve nada).
     details: dict[str, Any] | None
 
 
@@ -89,8 +74,6 @@ _LIST_STATIONS_SQL = text(
     """
 )
 
-# `expires > now()`: um alerta vencido some sozinho da resposta, sem DELETE
-# (ver comentário em app/jobs/import_weather_inmet_alerts.py).
 _LIST_ACTIVE_ALERTS_SQL = text(
     """
     SELECT a.provider::text        AS provider,
@@ -111,8 +94,6 @@ _LIST_ACTIVE_ALERTS_SQL = text(
     """
 )
 
-# Última execução concluída de cada job: um refresh em curso não torna os
-# dados publicados indisponíveis. Falhas concluídas continuam visíveis.
 _LATEST_RUN_PER_JOB_SQL = text(
     """
     SELECT DISTINCT ON (job) job, status::text AS status, started_at, finished_at, details

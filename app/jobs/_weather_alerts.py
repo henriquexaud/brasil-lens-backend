@@ -1,13 +1,3 @@
-"""Upsert de `weather_alerts`, compartilhado entre INMET e CEMADEN.
-
-Extraído de `import_weather_inmet_alerts.py` ao adicionar o CEMADEN: os dois
-jobs gravam exatamente as mesmas colunas, a partir do mesmo
-`WeatherAlertRecord` (`app/providers/records.py`) — só o `provider` muda.
-Manter duas cópias quase idênticas do mesmo UPSERT de ~15 colunas seria o
-tipo de redundância que uma segunda fonte deixa óbvia; a primeira (só INMET)
-não justificava a extração sozinha.
-"""
-
 from __future__ import annotations
 
 import orjson
@@ -70,12 +60,6 @@ _UPSERT_ALERTS_SQL = text(
         OR NOT ST_Equals(target.polygon, EXCLUDED.polygon)
     """
 )
-
-# Alertas que já saíram da fonte (revogados) não desaparecem sozinhos daqui —
-# `GET /weather/alerts` já filtra por `expires > now()`, então uma linha
-# vencida simplesmente para de aparecer sem precisar de DELETE. Vale para as
-# duas fontes: o CEMADEN só nunca reconfirma `vigencia` (ver
-# app/providers/cemaden/alerts.py) em vez de mandar uma data de fim explícita.
 
 
 async def upsert_alerts(

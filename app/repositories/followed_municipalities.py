@@ -1,9 +1,3 @@
-"""Acesso a dados dos municípios seguidos.
-
-Como nos demais repositórios, nenhuma política mora aqui: quem decide o que é
-404 ou 400 é o serviço.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -30,11 +24,6 @@ class FollowedRow:
 
 
 def _select_rows(user_id: str) -> Select[Any]:
-    """Vínculos do usuário com nome e UF resolvidos por JOIN.
-
-    LEFT JOIN: um código que sumiu do catálogo continua na lista (com nome
-    nulo) em vez de desaparecer em silêncio — é o usuário quem o remove.
-    """
     municipality = aliased(Territory, name="municipality")
     state = aliased(Territory, name="state")
     return (
@@ -62,7 +51,6 @@ def _to_row(record: Row[Any]) -> FollowedRow:
 
 
 async def list_for_user(session: AsyncSession, user_id: str) -> list[FollowedRow]:
-    """Mais recentes primeiro para facilitar o acesso aos últimos vínculos."""
     stmt = _select_rows(user_id).order_by(
         FollowedMunicipality.created_at.desc(), FollowedMunicipality.id.desc()
     )
@@ -76,12 +64,6 @@ async def get_for_user(session: AsyncSession, user_id: str, code: str) -> Follow
 
 
 async def follow(session: AsyncSession, user_id: str, code: str) -> bool:
-    """Cria o vínculo se ainda não existe. Devolve `True` se criou.
-
-    `ON CONFLICT DO NOTHING` sobre a UNIQUE `(user_id, municipality_code)`:
-    dois cliques simultâneos não viram erro nem linha duplicada — o banco é
-    quem arbitra, não uma checagem prévia sujeita a corrida.
-    """
     stmt = (
         insert(FollowedMunicipality)
         .values(user_id=user_id, municipality_code=code)
@@ -92,7 +74,6 @@ async def follow(session: AsyncSession, user_id: str, code: str) -> bool:
 
 
 async def unfollow(session: AsyncSession, user_id: str, code: str) -> int:
-    """Devolve quantas linhas foram removidas (0 = não seguia)."""
     result = await session.execute(
         delete(FollowedMunicipality).where(
             FollowedMunicipality.user_id == user_id,
@@ -103,7 +84,6 @@ async def unfollow(session: AsyncSession, user_id: str, code: str) -> int:
 
 
 async def set_notifications(session: AsyncSession, user_id: str, code: str, enabled: bool) -> bool:
-    """Liga/desliga as notificações do vínculo. Devolve `True` se o vínculo existe."""
     stmt = (
         update(FollowedMunicipality)
         .where(

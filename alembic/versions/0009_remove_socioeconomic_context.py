@@ -1,14 +1,3 @@
-"""Remove o domínio estatístico e preserva geografia e dados ambientais.
-
-A exclusão de dados é definitiva: downgrade restaura apenas o schema anterior.
-Para recuperar os dados removidos, é necessário restaurar um backup.
-Migrations anteriores permanecem imutáveis para permitir upgrades existentes.
-
-Revision ID: 0009_remove_socioeconomic
-Revises: 0008_followed_notifications
-Create Date: 2026-09-25
-"""
-
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -23,7 +12,6 @@ down_revision: str | None = "0008_followed_notifications"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-# Types are created explicitly, so table creation must not create them again.
 INDICATOR_ORIGIN = postgresql.ENUM("sourced", "derived", name="indicator_origin", create_type=False)
 DATA_CONTEXT = postgresql.ENUM(
     "sociopolitical",
@@ -38,15 +26,12 @@ TERRITORY_LEVEL = postgresql.ENUM(
 
 
 def upgrade() -> None:
-    # No CASCADE: unexpected dependencies must abort the transaction, not be removed.
     op.drop_table("saved_views")
     op.drop_table("indicator_values")
     op.drop_table("indicators")
     op.execute("DROP TYPE data_context")
     op.execute("DROP TYPE indicator_origin")
 
-    # Remove obsolete provenance only when no remaining environmental/geographic
-    # data references it. Geography and weather keep their original provenance.
     op.execute(
         """
         DELETE FROM datasets d
@@ -68,13 +53,11 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Restore the exact schema at 0008; deleted values/provenance require a backup.
     op.execute("CREATE TYPE indicator_origin AS ENUM ('sourced', 'derived')")
     op.execute(
         "CREATE TYPE data_context AS ENUM "
         "('sociopolitical', 'climate_environmental', 'biodiversity')"
     )
-    # -- indicators -------------------------------------------------------
     op.create_table(
         "indicators",
         sa.Column("id", sa.SmallInteger(), sa.Identity(always=False), nullable=False),
@@ -104,10 +87,6 @@ def downgrade() -> None:
 
     op.create_index("ix_indicators_context", "indicators", ["context"])
 
-    # -- indicator_values -------------------------------------------------
-    # PK composta = chave natural do domínio (território ↔ indicador ↔ ano).
-    # Serve simultaneamente como constraint de unicidade para o upsert e como
-    # índice do overview (WHERE territory_id = ?).
     op.create_table(
         "indicator_values",
         sa.Column("territory_id", sa.Integer(), nullable=False),
@@ -160,8 +139,6 @@ def downgrade() -> None:
             "territory_id", "indicator_id", "reference_year", name="pk_indicator_values"
         ),
     )
-    # Query do mapa: filtra indicador + ano e precisa de território e valor.
-    # O INCLUDE deixa a leitura index-only (sem tocar a heap).
     op.create_index(
         "ix_indicator_values_indicator_id_reference_year",
         "indicator_values",
@@ -193,8 +170,6 @@ def downgrade() -> None:
             server_default=sa.text("now()"),
             nullable=False,
         ),
-        # NULL em reference_year é "último ano disponível" — o mesmo `latest`
-        # da rota do mapa.
         sa.CheckConstraint(
             "reference_year IS NULL OR reference_year BETWEEN 1900 AND 2100",
             name="ck_saved_views_saved_view_year_range",
@@ -203,8 +178,6 @@ def downgrade() -> None:
             "classes BETWEEN 2 AND 9",
             name="ck_saved_views_saved_view_class_range",
         ),
-        # A mesma regra que a rota /map aplica, agora garantida pelo banco:
-        # nenhuma visualização impossível de abrir pode ser gravada.
         sa.CheckConstraint(
             "level <> 'municipality' OR parent_code IS NOT NULL",
             name="ck_saved_views_saved_view_municipality_needs_parent",
@@ -217,5 +190,4 @@ def downgrade() -> None:
         sa.UniqueConstraint("public_id", name="uq_saved_views_public_id"),
         sa.UniqueConstraint("name", name="uq_saved_views_name"),
     )
-    # A listagem é sempre "mais recentes primeiro".
     op.create_index("ix_saved_views_created_at", "saved_views", ["created_at"])

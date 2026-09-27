@@ -1,5 +1,3 @@
-"""Cache TTL local de leitura; Redis complementa dados públicos em redis_cache.py."""
-
 from __future__ import annotations
 
 import time
@@ -38,12 +36,6 @@ class TTLCache(Generic[T]):
         return value
 
     def set(self, key: Any, value: T, *, ttl_seconds: int | None = None) -> None:
-        """Guarda um valor. `ttl_seconds` sobrepõe o TTL padrão.
-
-        O TTL por entrada existe porque fontes diferentes têm cadências de
-        atualização diferentes: dados censitários mudam a cada ingestão, mas
-        uma camada meteorológica futura mudaria a cada hora.
-        """
         if not self.enabled:
             return
         ttl = self._ttl if ttl_seconds is None else ttl_seconds

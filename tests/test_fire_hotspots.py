@@ -1,5 +1,3 @@
-"""Contrato real INPE, recorte exato, cache/falhas e consulta pontual."""
-
 import asyncio
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
@@ -19,7 +17,6 @@ from app.services import fire_scope
 
 
 def payload() -> dict:
-    # Campos confirmados no DescribeFeatureType e GetFeature oficial do BDQueimadas.
     return {
         "type": "FeatureCollection",
         "numberMatched": 77157,
@@ -62,7 +59,7 @@ async def test_real_contract_and_complete_coverage_metadata() -> None:
     )
     result = await service.get_fire_hotspots(AsyncMock())
     assert result.metadata.hotspot_count == 77157
-    assert len(result.features) == 1  # Prévia apenas; sem truncar a cobertura WMS.
+    assert len(result.features) == 1
     assert result.metadata.wms_layer == "bdqueimadas:focos"
     params = upstream.calls[0].request.url.params
     assert params["typeNames"] == "bdqueimadas:focos"
@@ -70,7 +67,7 @@ async def test_real_contract_and_complete_coverage_metadata() -> None:
     assert "id_0=33 AND data_hora_gmt >=" in params["cql_filter"]
     assert params["cql_filter"] == result.metadata.cql_filter
     feature = result.features[0]
-    assert feature.id == "inpe:1891867420"  # ID persistente, não o fid temporário WFS.
+    assert feature.id == "inpe:1891867420"
     assert feature.properties.municipality_code == "1504604"
     assert feature.properties.detected_at.utcoffset() == timedelta(0)
     assert feature.properties.fire_risk == 0.8
@@ -148,7 +145,7 @@ async def test_empty_is_success_but_server_error_is_not_an_empty_result() -> Non
         await service.get_fire_hotspots(AsyncMock())
     with pytest.raises(ProviderError):
         await service.get_fire_hotspots(AsyncMock())
-    assert upstream.call_count == 2  # Cooldown após a primeira falha.
+    assert upstream.call_count == 2
 
 
 @respx.mock

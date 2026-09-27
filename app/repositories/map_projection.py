@@ -1,11 +1,3 @@
-"""Projeção de leitura do mapa: malha territorial e atributos espaciais.
-
-Resolve de forma direta e otimizada:
-* o escopo territorial (todas as UFs, ou os municípios de um estado);
-* a geometria no LOD pedido (overview ou detail);
-* o bounding box de cada território para enquadramento do mapa.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -62,7 +54,6 @@ async def fetch_map_projection(
     lod: GeometryLOD,
     parent_id: int | None = None,
 ) -> list[MapFeatureRow]:
-    """Executa a projeção da malha territorial para o mapa."""
     result = await session.execute(
         _MAP_SQL,
         {
@@ -116,7 +107,6 @@ async def fetch_single_feature(
     ibge_code: str,
     lod: GeometryLOD = GeometryLOD.DETAIL,
 ) -> MapFeatureRow | None:
-    """Busca a geometria e atributos de um único território no LOD especificado."""
     result = (
         await session.execute(_SINGLE_FEATURE_SQL, {"code": ibge_code, "lod": lod.value})
     ).first()
@@ -134,7 +124,6 @@ async def fetch_single_feature(
     )
 
 
-# Jobs cuja execução altera a malha territorial ou de geometrias servida no mapa.
 _MAP_JOBS = ("import_territories", "import_geometries")
 _version_cache: TTLCache[int] = TTLCache(ttl_seconds=60, max_entries=1)
 
@@ -149,13 +138,11 @@ _DATA_VERSION_SQL = text(
 
 
 async def fetch_data_version(session: AsyncSession) -> int:
-    """Instante (epoch) da última ingestão que alterou territórios ou malhas."""
     result = await session.execute(_DATA_VERSION_SQL, {"jobs": list(_MAP_JOBS)})
     return int(result.scalar_one())
 
 
 async def data_version(session: AsyncSession) -> int:
-    """Versão compartilhada pela malha e seus derivados; uma consulta por minuto."""
     cached = _version_cache.get("version")
     if cached is not None:
         return cached

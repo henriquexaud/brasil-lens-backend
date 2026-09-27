@@ -1,8 +1,3 @@
-"""Contrato do endpoint de mapa.
-
-A resposta é um GeoJSON FeatureCollection válido com a malha territorial e seus metadados.
-"""
-
 from __future__ import annotations
 
 import enum
@@ -15,8 +10,6 @@ from app.schemas.common import CamelModel
 
 
 class MapLod(str, enum.Enum):
-    """Níveis de detalhe que a API aceita servir no mapa."""
-
     OVERVIEW = "overview"
     DETAIL = "detail"
 
@@ -25,8 +18,6 @@ class MapLod(str, enum.Enum):
 
 
 class MapScope(CamelModel):
-    """Qual recorte territorial esta resposta representa."""
-
     level: TerritoryLevel
     parent: str | None = None
     lod: GeometryLOD
@@ -59,7 +50,6 @@ class MapFeatureCollection(CamelModel):
 
     @model_serializer(mode="wrap")
     def _serialize(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
-        """Omite `bbox` quando não há extensão conhecida."""
         data: dict[str, Any] = handler(self)
         if data.get("bbox") is None:
             data.pop("bbox", None)

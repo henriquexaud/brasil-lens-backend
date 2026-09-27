@@ -1,20 +1,3 @@
-"""Provider das malhas territoriais oficiais do IBGE (API de Malhas v3).
-
-`https://servicodados.ibge.gov.br/api/v3/malhas`
-
-Observações verificadas contra a API em produção:
-
-* O parâmetro ``qualidade`` **deixou de ser numérico**: hoje aceita apenas
-  ``minima``, ``intermediaria`` ou ``maxima``. Valores antigos (``4``) retornam
-  HTTP 400. A tradução fica isolada aqui de propósito.
-* As features vêm com a propriedade ``codarea`` contendo o código IBGE — e
-  ``codarea`` do país é literalmente ``"BR"``, o mesmo token que usamos no nível
-  raiz.
-* Os tipos de geometria **misturam** ``Polygon`` e ``MultiPolygon`` na mesma
-  resposta. A normalização para MultiPolygon acontece no banco (``ST_Multi``),
-  não aqui: é o PostGIS que garante o tipo da coluna.
-"""
-
 from __future__ import annotations
 
 from typing import Any, Literal
@@ -39,7 +22,6 @@ _GEOJSON_FORMAT = "application/vnd.geo+json"
 
 
 async def fetch_country(client: httpx.AsyncClient, quality: Quality = "maxima") -> GeometryRecord:
-    """Contorno do Brasil (1 feature, `codarea="BR"`)."""
     features = await _fetch_features(client, "/api/v3/malhas/paises/BR", quality=quality)
     return _single(features, scope="paises/BR")
 
@@ -47,7 +29,6 @@ async def fetch_country(client: httpx.AsyncClient, quality: Quality = "maxima") 
 async def fetch_regions(
     client: httpx.AsyncClient, quality: Quality = "maxima"
 ) -> list[GeometryRecord]:
-    """As 5 grandes regiões (`codarea` = 1..5)."""
     return await _fetch_features(
         client, "/api/v3/malhas/paises/BR", quality=quality, intrarregiao="regiao"
     )
@@ -56,7 +37,6 @@ async def fetch_regions(
 async def fetch_states(
     client: httpx.AsyncClient, quality: Quality = "maxima"
 ) -> list[GeometryRecord]:
-    """As 27 UFs (`codarea` = código da UF)."""
     return await _fetch_features(
         client, "/api/v3/malhas/paises/BR", quality=quality, intrarregiao="UF"
     )
@@ -67,11 +47,6 @@ async def fetch_municipalities_of_state(
     state_ibge_code: str,
     quality: Quality = "maxima",
 ) -> list[GeometryRecord]:
-    """Municípios de uma UF.
-
-    O recorte por UF é o que torna a ingestão viável: a malha municipal completa
-    do país passa de 60 MB, enquanto por UF fica entre ~1 MB e ~9 MB.
-    """
     return await _fetch_features(
         client,
         f"/api/v3/malhas/estados/{state_ibge_code}",

@@ -1,5 +1,3 @@
-"""A paginação não altera as coordenadas da malha oficial."""
-
 import json
 from unittest.mock import AsyncMock
 

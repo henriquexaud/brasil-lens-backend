@@ -1,19 +1,9 @@
-"""Municípios seguidos — a relação `usuário ↔ município` do contexto Clima.
-
-Só a relação: nenhuma coluna de alerta, canal ou dado meteorológico. Ver
-`app/models/followed_municipality.py` para o porquê de `user_id` opaco e de o
-município ir por código IBGE sem FK.
-
-Revision ID: 0007_followed_municipalities
-Revises: 0006_weather_alert_description
-Create Date: 2026-09-23
-"""
-
 from __future__ import annotations
 
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "0007_followed_municipalities"
@@ -49,14 +39,12 @@ def upgrade() -> None:
             name="ck_followed_municipalities_user_id_not_blank",
         ),
         sa.PrimaryKeyConstraint("id", name="pk_followed_municipalities"),
-        # Um usuário segue um município no máximo uma vez.
         sa.UniqueConstraint(
             "user_id",
             "municipality_code",
             name="uq_followed_municipalities_user_id_municipality_code",
         ),
     )
-    # "Quem segue este município?" — a consulta de um futuro disparador de alertas.
     op.create_index(
         "ix_followed_municipalities_municipality_code",
         "followed_municipalities",

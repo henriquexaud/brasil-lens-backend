@@ -1,19 +1,3 @@
-"""Importa os avisos meteorológicos ativos do INMET.
-
-`python -m app.jobs.import_weather_inmet_alerts`
-
-Uma única requisição (`GET /avisos/ativos`) já devolve todos os avisos ativos
-— sem N+1 por aviso, ao contrário das estações (ver
-`import_weather_inmet_stations.py`). O polígono chega como GeoJSON e é
-normalizado para `MULTIPOLYGON` válido com `ST_Multi(ST_CollectionExtract(
-ST_MakeValid(...), 3))` — a mesma normalização que `import_geometries.py` já
-aplica à malha do IBGE, pelo mesmo motivo: garantir um único tipo de coluna
-mesmo quando a fonte manda variações (aqui, `Polygon` único por aviso).
-
-O UPSERT em si mora em `_weather_alerts.py`, compartilhado com
-`import_weather_cemaden_alerts.py` — as duas fontes gravam as mesmas colunas.
-"""
-
 from __future__ import annotations
 
 from app.core.config import settings

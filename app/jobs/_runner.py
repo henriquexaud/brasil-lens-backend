@@ -1,16 +1,3 @@
-"""Infraestrutura comum dos jobs de ingestão.
-
-Responsabilidades: registrar a execução em `ingestion_runs`, garantir upsert de
-`datasets` e padronizar a saída no terminal. Nada de fila, agendador ou
-orquestrador — CLI é suficiente para o MVP.
-
-**Falha parcial é um resultado de primeira classe.** Cada escopo (uma UF, um
-dataset) commita separadamente; se 3 de 27 UFs falharem, as outras 24 ficam
-gravadas e o run termina com `status='partial'`, listando os escopos falhos em
-`details`. O contrário — abortar tudo — descartaria dezenas de MB de download
-por causa de um 503 momentâneo.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -33,8 +20,6 @@ logger = get_logger(__name__)
 
 @dataclass
 class RunReport:
-    """Acumulador do resultado de um job."""
-
     processed: int = 0
     written: int = 0
     failed: int = 0
@@ -47,8 +32,6 @@ class RunReport:
 
     @property
     def status(self) -> IngestionStatus:
-        # `written` conta só linhas alteradas: num re-run idempotente ele é 0
-        # mesmo com escopos bem-sucedidos, então `processed` também conta.
         if self.failures and self.written == 0 and self.processed <= self.failed:
             return IngestionStatus.FAILED
         if self.failures:
@@ -122,11 +105,6 @@ async def upsert_dataset(
     url: str | None = None,
     source_updated_at: datetime | None = None,
 ) -> int:
-    """Garante o dataset e devolve seu id.
-
-    Idempotente via UNIQUE (source, code): reexecutar atualiza nome/URL em vez
-    de criar uma linha nova. A data da fonte só muda quando informada.
-    """
     updates: dict[str, Any] = {"name": name, "url": url, "updated_at": datetime.now(UTC)}
     if source_updated_at is not None:
         updates["source_updated_at"] = source_updated_at
@@ -153,10 +131,6 @@ async def upsert_dataset(
 async def job_session(
     *, job: str, source: str, dataset_code: str | None = None
 ) -> AsyncIterator[tuple[AsyncSession, int, RunReport]]:
-    """Abre sessão, registra o run e garante fechamento do registro.
-
-    A sessão é entregue sem transação aberta: cada job commita por escopo.
-    """
     async with SessionFactory() as session:
         run_id = await start_run(session, job=job, source=source, dataset_code=dataset_code)
         report = RunReport()
@@ -171,7 +145,6 @@ async def job_session(
 
 
 def run_job(main: Callable[[], Awaitable[int]]) -> None:
-    """Ponto de entrada padrão dos módulos de job (`python -m app.jobs.x`)."""
     configure_logging()
 
     async def _wrapped() -> int:

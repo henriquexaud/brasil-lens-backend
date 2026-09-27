@@ -1,21 +1,3 @@
-"""Municípios seguidos pelo usuário (contexto Clima).
-
-Separado das rotas de clima de propósito: carregar o tempo de um município e
-saber se o usuário o acompanha são perguntas diferentes, com caches diferentes
-— a primeira é projeção pública e cacheável, a segunda é pessoal e `no-store`.
-
-    GET    /me/followed-municipalities                      lista
-    PUT    /me/followed-municipalities/{code}               segue: 201 (novo) / 200 (já segue)
-    DELETE /me/followed-municipalities/{code}               deixa: 204
-    POST   /me/followed-municipalities/{code}/notifications notificações: 200 / 404
-
-`/me` é o usuário da requisição (ver `get_current_user_id`). PUT e DELETE são
-idempotentes: o recurso é o próprio município, então repetir o pedido depois
-de uma atualização otimista no cliente nunca vira erro. Já o alerta de
-notificações é uma ação sobre um vínculo que precisa existir — por isso POST,
-não PUT, e por isso 404 quando não há o que ligar ou desligar.
-"""
-
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Response, status
@@ -49,7 +31,6 @@ async def list_followed(
     user_id: UserId,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> FollowedMunicipalityListResponse:
-    # Muda a cada seguir/deixar do próprio usuário: cache mentiria logo depois.
     response.headers["Cache-Control"] = "no-store"
     return await followed_service.list_followed(session, user_id)
 

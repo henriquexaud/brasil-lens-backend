@@ -1,5 +1,3 @@
-"""Modelos SQLAlchemy. Importados em conjunto para que o metadata fique completo."""
-
 from app.models.followed_municipality import FollowedMunicipality
 from app.models.ingestion import Dataset, IngestionRun, IngestionStatus
 from app.models.territory import (

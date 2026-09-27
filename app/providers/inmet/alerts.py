@@ -1,46 +1,3 @@
-"""Avisos meteorológicos oficiais do INMET.
-
-Contrato confirmado por chamada HTTP real a `GET /avisos/ativos` durante o
-desenho deste provider — exemplo real recebido (`icone` truncado aqui, o
-provider ignora esse campo):
-
-```json
-{
-  "id_aviso": 28277, "id_sequencia": 2,
-  "codigo": "urn:oid:2.49.0.0.76.0.2026.28277.2",
-  "referencia": "info.aviso@inmet.gov.br,urn:oid:...28277.1,2026-09-16T00:00:00-03:00",
-  "data_inicio": "2026-09-19T00:00:00.000Z", "data_fim": "2026-09-20T00:00:00.000Z",
-  "estados": "Paraná,Santa Catarina,...", "descricao": "Tempestade",
-  "aviso_cor": "#FFFE00", "severidade": "Perigo Potencial",
-  "alterado": false, "encerrado": false,
-  "riscos": ["Chuva entre 20 e 30 mm/h..."],
-  "instrucoes": ["Em caso de rajadas de vento...", "..."]
-}
-```
-
-Duas decisões que só ficaram claras com o exemplo real:
-
-- **A chave estável é `id_aviso`, não `codigo`.** `codigo` muda a cada
-  revisão do mesmo aviso (`...28277.1` → `...28277.2`, ligadas por
-  `referencia`); `id_aviso` é o identificador que se mantém. Usar `codigo`
-  como `external_id` criaria uma linha nova a cada revisão em vez de
-  atualizar a existente — o oposto do upsert idempotente que o resto do
-  projeto usa.
-- **`municipios`/`estados`/`geocodes` são opcionais e mutuamente
-  independentes.** Um aviso pode cobrir estados inteiros sem listar
-  municípios (o exemplo acima não tem `municipios` nem `geocodes`). Só
-  `geocodes` é usado aqui — é a única variante documentada como puramente
-  numérica (código IBGE); `municipios` mistura nome e código em texto livre e
-  não vale a pena parsear quando o polígono já é a representação espacial
-  primária.
-- **`poligono` vem duplamente serializado**: uma *string* contendo JSON, não
-  um objeto GeoJSON aninhado — só ficou evidente rodando o job contra a fonte
-  de verdade (`python -m app.jobs.import_weather_inmet_alerts`): a primeira
-  execução real reportou 3 avisos ativos e 0 gravados, porque o código
-  original checava `isinstance(poligono, dict)` e descartava os três em
-  silêncio. Ver `_parse_polygon`.
-"""
-
 from __future__ import annotations
 
 from datetime import datetime
@@ -96,14 +53,6 @@ def _to_alert(entry: dict[str, Any]) -> WeatherAlertRecord | None:
 
 
 def _parse_polygon(value: Any) -> dict[str, Any] | None:
-    """`poligono` chega **duplamente serializado**: uma string JSON, não um
-    objeto aninhado — descoberto rodando o job contra a fonte real (a
-    verificação inicial desta sessão, feita por uma ferramenta de leitura de
-    página, já havia mostrado o GeoJSON por dentro da string sem sinalizar
-    que era string). Sem este parse extra, todo aviso é descartado em
-    silêncio — foi exatamente o que aconteceu na primeira execução real deste
-    job (3 avisos ativos, 0 gravados).
-    """
     if isinstance(value, dict):
         return value
     if not isinstance(value, str):

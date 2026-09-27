@@ -1,5 +1,3 @@
-"""Camada pública de focos INPE e detalhes consultados ao selecionar o mapa."""
-
 from datetime import datetime
 from typing import Annotated
 
@@ -40,7 +38,6 @@ async def get_fire_hotspots(
     parent: Parent = None,
     hours: Hours = service.DEFAULT_FIRE_HOURS,
 ) -> FireHotspotCollection:
-    """Contagem, atualização, prévia recente e configuração WMS para todos os focos."""
     result = await service.get_fire_hotspots(session, level=level, parent_code=parent, hours=hours)
     response.headers["Cache-Control"] = "no-cache"
     return result
@@ -58,7 +55,6 @@ async def identify_fire_hotspots(
     parent: Parent = None,
     hours: Hours = service.DEFAULT_FIRE_HOURS,
 ) -> FireHotspotDetails:
-    """Até 20 detecções próximas ao ponto, ordenadas por proximidade, no mesmo período do mapa."""
     result = await service.identify_fire_hotspots(
         session,
         level=level,

@@ -1,10 +1,3 @@
-"""Contratos das rotas de clima — GeoJSON, sem `level`/`parent`.
-
-Mesma decisão de `schemas/map.py` (FeatureCollection válida com membros
-estrangeiros, consumível direto pelo `<GeoJSON>` do react-leaflet), mas sem
-o escopo da malha: cada estação ou alerta tem sua própria geometria.
-"""
-
 from __future__ import annotations
 
 import enum
@@ -32,8 +25,6 @@ class WeatherStationProperties(CamelModel):
 
 class WeatherStationFeature(CamelModel):
     type: Literal["Feature"] = "Feature"
-    # `{provider}:{externalCode}` — estável e único mesmo se dois providers
-    # reusarem o mesmo formato de código por coincidência.
     id: str
     properties: WeatherStationProperties
     geometry: dict[str, Any]
@@ -45,28 +36,15 @@ class WeatherStationCollection(CamelModel):
 
 
 class WeatherAlertCategory(str, enum.Enum):
-    """Classificação comum entre fontes — o frontend decide layout por isto,
-    não por `provider`. Hoje é 100% função da fonte (o INMET só emite
-    fenômeno meteorológico; o CEMADEN só emite risco geo-hidrológico), mas
-    fica no alerta, não só documentado em `provider`, porque é o dado que a
-    UI realmente usa (ver `services/weather.py::_category_for`).
-    """
-
     METEOROLOGICAL = "meteorological"
     GEO_HYDROLOGICAL = "geo_hydrological"
 
 
 class WeatherAlertSeverityLevel(str, enum.Enum):
-    """Tier visual comum em 4 níveis normalizados:
-    Moderado, Alto, Muito alto e Extremo.
-    Mantém aliases legados para compatibilidade.
-    """
-
     MODERATE = "moderate"
     HIGH = "high"
     VERY_HIGH = "very_high"
     EXTREME = "extreme"
-    # Aliases legados
     POTENTIAL = "potential"
     DANGER = "danger"
     OTHER = "other"
@@ -79,9 +57,6 @@ class WeatherAlertProperties(CamelModel):
     severity: str
     severity_level: WeatherAlertSeverityLevel
     color: str | None = None
-    # Frase livre opcional da fonte além de `event` (ex.: "BLUMENAU/SC" do
-    # CEMADEN, onde `event` sozinho não diz o município). `None` para fontes
-    # onde `event`/`risks` já bastam — o INMET, hoje.
     description: str | None = None
     onset: datetime
     expires: datetime
@@ -103,13 +78,6 @@ class WeatherAlertCollection(CamelModel):
 
 
 class WeatherSourceStatusValue(str, enum.Enum):
-    """Frescor de uma fonte, derivado de `ingestion_runs` — não do dado em si.
-
-    Distinto de "sem dado" (política já coberta em `schemas/map.py`): aqui a
-    pergunta é "a fonte está respondendo dentro do esperado", não "há valor
-    para este território".
-    """
-
     OK = "ok"
     STALE = "stale"
     UNAVAILABLE = "unavailable"
@@ -153,13 +121,8 @@ class WeatherCity(CamelModel):
     precipitation_probability_pct: FiniteFloat | None = None
     precipitation_interval_minutes: int
     weather_code: int | None
-    # Acumulado das últimas 48 h, o que o mapa de chuva pinta; `precipitation_mm`
-    # é só o intervalo mais recente e `precipitation_sum_mm`, o total de hoje.
     precipitation_48h_mm: FiniteFloat | None = Field(default=None, alias="precipitation48hMm")
-    # Chovendo no intervalo mais recente (precipitação ou código de chuva).
     raining_now: bool = False
-    # Visão do Brasil: quantos pontos medidos compõem a média da UF e quantos
-    # têm chuva agora.
     sample_points: int | None = None
     raining_points: int | None = None
     forecast: list[WeatherForecastDay]

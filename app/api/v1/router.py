@@ -1,5 +1,3 @@
-"""Agregação das rotas da v1."""
-
 from fastapi import APIRouter
 
 from app.api.v1 import (

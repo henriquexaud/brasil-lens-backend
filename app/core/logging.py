@@ -1,5 +1,3 @@
-"""Logging da aplicação: uma linha por evento, com contexto anexável."""
-
 import json
 import logging
 import sys
@@ -28,8 +26,6 @@ class _JsonFormatter(logging.Formatter):
 
 
 class _ConsoleFormatter(logging.Formatter):
-    """Formato legível para desenvolvimento, preservando os campos extra."""
-
     def format(self, record: logging.LogRecord) -> str:
         base = f"{record.levelname:<7} {record.name:<28} {record.getMessage()}"
         extra = {k: v for k, v in record.__dict__.items() if k not in _RESERVED}
@@ -49,7 +45,6 @@ def configure_logging() -> None:
     root.addHandler(handler)
     root.setLevel(settings.log_level.upper())
 
-    # O uvicorn instala handlers próprios; deixamos os nossos no comando.
     for name in ("uvicorn", "uvicorn.access", "uvicorn.error"):
         logger = logging.getLogger(name)
         logger.handlers.clear()

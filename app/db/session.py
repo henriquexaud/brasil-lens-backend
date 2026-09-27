@@ -1,5 +1,3 @@
-"""Engine e sessões assíncronas."""
-
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     async_sessionmaker,

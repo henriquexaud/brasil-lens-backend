@@ -1,5 +1,3 @@
-"""Rota de hidrografia: rios e massas d'água sob demanda com carregamento progressivo."""
-
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query, Response
@@ -53,6 +51,5 @@ async def get_hydrography(
         zoom=zoom,
         bbox=parse_bbox(bbox) if bbox else None,
     )
-    # Cache longo no cliente para evitar chamadas de rede repetidas durante navegação
     response.headers["Cache-Control"] = f"public, max-age={settings.http_cache_max_age}"
     return collection

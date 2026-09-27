@@ -1,5 +1,3 @@
-"""Importa territórios e geometrias necessárias ao mapa climático."""
-
 from __future__ import annotations
 
 import argparse

@@ -1,5 +1,3 @@
-"""Falhas parciais devem ser visíveis também para quem executa a CLI."""
-
 import sys
 from contextlib import asynccontextmanager
 from types import SimpleNamespace

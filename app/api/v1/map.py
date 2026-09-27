@@ -1,15 +1,3 @@
-"""Rota do mapa: a projeção de leitura do produto.
-
-Um endpoint serve a malha base em diferentes escopos geográficos:
-
-    /map?level=state                       → as 27 UFs (visão inicial)
-    /map?level=municipality&parent=35      → municípios de SP (drill-down)
-
-Um endpoint significa um plano de execução para otimizar, uma chave de cache e
-um contrato — em vez de dois caminhos que precisam ser mantidos em sincronia.
-
-"""
-
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request, Response
@@ -35,11 +23,6 @@ ParentQuery = Annotated[
 
 
 def _conditional(request: Request, etag: str) -> tuple[dict[str, str], bool]:
-    """Cabeçalhos de cache e se o navegador já tem esta versão (304).
-
-    O ETag nasce da identidade da projeção mais a versão da ingestão, então
-    é decidido antes de montar a resposta: um 304 não toca o PostGIS.
-    """
     headers = {
         "ETag": etag,
         "Cache-Control": (

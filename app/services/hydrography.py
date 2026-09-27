@@ -1,9 +1,3 @@
-"""Hidrografia ANA por escala: principais eixos no país, geometria recortada no viewport.
-
-Área de drenagem determina a hierarquia dos rios; área de superfície filtra lagos.
-Os rios nacionais vêm do snapshot local; escalas próximas consultam a ANA em páginas.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -30,23 +24,17 @@ from app.schemas.hydrography import (
 
 logger = get_logger(__name__)
 
-# Endpoints oficiais da ANA / SNIRH
 ANA_RIVERS_URL = "https://www.snirh.gov.br/arcgis/rest/services/SNIRH2016/Cursos_Agua_dominialidade/FeatureServer/0/query"
 ANA_WATER_BODIES_URL = (
     "https://www.snirh.gov.br/arcgis/rest/services/SNIRH2016/Massa_dagua/MapServer/0/query"
 )
 
-# Bounding box aproximado do Brasil (Oeste, Sul, Leste, Norte)
 BRAZIL_BBOX: tuple[float, float, float, float] = (-73.99, -33.75, -28.84, 5.27)
 
-CACHE_TTL_SECONDS = 86400  # 24 horas
+CACHE_TTL_SECONDS = 86400
 _cache: TTLCache[HydroFeatureCollection] = TTLCache(CACHE_TTL_SECONDS, max_entries=128)
 _locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
-# ANA fora do ar: sem a pausa, cada movimento do mapa esperava o timeout
-# inteiro de novo. Durante ela, a camada sai do snapshot local na hora.
 ana_cooldown = SourceCooldown("ana", 60)
-# Uma resposta parcial vale por pouco tempo: o bastante para não recalcular o
-# mesmo recorte, curto o bastante para a ANA voltar logo que se recuperar.
 PARTIAL_CACHE_SECONDS = 60
 
 _SNAPSHOT_PATH = Path(__file__).parent / "data" / "major_rivers.json"
@@ -54,7 +42,6 @@ _MAJOR_RIVERS: list[HydroFeature] = []
 
 
 def _init_major_rivers() -> list[HydroFeature]:
-    """Carrega os 64 rios principais completos pré-consolidados em memória."""
     global _MAJOR_RIVERS
     if _MAJOR_RIVERS:
         return _MAJOR_RIVERS
@@ -95,7 +82,6 @@ def _init_major_rivers() -> list[HydroFeature]:
     return _MAJOR_RIVERS
 
 
-# Inicialização imediata ao carregar o módulo
 _init_major_rivers()
 
 
@@ -105,7 +91,6 @@ def _format_bbox(bbox: tuple[float, float, float, float]) -> str:
 
 
 def _consolidate_river_segments(raw_features: list[dict[str, Any]]) -> list[HydroFeature]:
-    """Agrupa segmentos avulsos pelo nome do rio e consolida em MultiLineString contínua."""
     grouped: dict[str, dict[str, Any]] = {}
     for feat in raw_features:
         geom = feat.get("geometry")
@@ -180,7 +165,6 @@ def _consolidate_river_segments(raw_features: list[dict[str, Any]]) -> list[Hydr
 
 
 def hydro_detail(zoom: float) -> tuple[float, float, float]:
-    """Área mínima de drenagem, área de lago e tolerância em graus por escala."""
     if zoom < 6:
         return 200000, 250, 0.025
     if zoom < 8:
@@ -191,7 +175,6 @@ def hydro_detail(zoom: float) -> tuple[float, float, float]:
 
 
 def _simplify_line(points: list[list[float]], tolerance: float) -> list[list[float]]:
-    # Douglas-Peucker iterativo: não depende da profundidade de recursão do rio.
     if len(points) < 3:
         return points
     keep = {0, len(points) - 1}
@@ -218,7 +201,6 @@ def _simplify_line(points: list[list[float]], tolerance: float) -> list[list[flo
 def _clip_line(
     points: list[list[float]], bbox: tuple[float, float, float, float]
 ) -> list[list[list[float]]]:
-    # Liang-Barsky: mantém apenas os trechos do viewport, inclusive rios que o atravessam.
     west, south, east, north = bbox
     lines: list[list[list[float]]] = []
     for a, b in pairwise(points):
@@ -265,8 +247,6 @@ def _visible_river(
 async def _query_features(
     client: httpx.AsyncClient, url: str, params: dict[str, str]
 ) -> list[dict[str, Any]]:
-    # O serviço de massas d'água limita respostas a 1.000 e não oferece offsets.
-    # Os IDs selecionados pelo filtro permitem páginas completas, sem baixar o país.
     ids_response = await client.get(
         url, params={**params, "f": "json", "returnGeometry": "false", "returnIdsOnly": "true"}
     )
@@ -369,8 +349,6 @@ async def get_hydrography(
 ) -> HydroFeatureCollection:
     drainage, _, tolerance = hydro_detail(zoom)
     if level == "country" and zoom < 6:
-        # Na escala nacional a camada é a mesma para qualquer enquadramento:
-        # uma só entrada de cache, compartilhada e aquecida ao subir a API.
         parent_code, bbox = None, None
     effective_bbox = bbox
     if effective_bbox is None and parent_code:
@@ -438,7 +416,6 @@ async def get_hydrography(
             bbox=effective_bbox,
             features=visible + bodies,
         )
-        # Uma falha transitória não vira uma camada incompleta em cache por 24h.
         if partial:
             _cache.set(key, result, ttl_seconds=PARTIAL_CACHE_SECONDS)
         else:
@@ -448,11 +425,6 @@ async def get_hydrography(
 
 
 async def warm_up(session: AsyncSession) -> None:
-    """Prepara a camada nacional — a primeira pedida — fora do caminho do usuário.
-
-    A consulta à ANA leva segundos; feita no startup, o primeiro visitante que
-    liga a hidrografia já encontra o cache pronto.
-    """
     try:
         await get_hydrography(session)
     except Exception:

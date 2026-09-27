@@ -1,24 +1,3 @@
-"""Importa estações automáticas do INMET e sua leitura mais recente.
-
-`python -m app.jobs.import_weather_inmet_stations`
-
-Fluxo:
-
-1. `GET /estacoes/T` — metadado de todas as estações operantes (uma
-   requisição).
-2. Upsert em lote de `weather_stations` com UNNEST para reduzir viagens ao banco.
-3. Para cada estação, `GET /estacao/{inicio}/{fim}/{codigo}` — uma
-   requisição por estação, em lotes de concorrência limitada
-   (`settings.inmet_max_concurrency`), pelo mesmo motivo que a importação
-   municipal do IBGE é UF-por-UF: centenas de estações de uma vez é a forma
-   mais confiável de tomar timeout.
-4. Upsert em lote da leitura mais recente de cada estação em
-   `weather_observations`.
-
-Chamado tanto manualmente quanto pelo laço periódico
-(`app/jobs/weather_scheduler.py`) — é o mesmo `main()` nos dois casos.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -207,10 +186,6 @@ async def main() -> int:
                 "observations": len(observations),
             }
 
-    # Estruturado, ao contrário do `print`: este job roda sem ninguém olhando
-    # o terminal a maior parte do tempo (chamado pelo scheduler a cada
-    # `weather_refresh_interval_seconds`), então o resultado por ciclo
-    # precisa ficar nos logs, não só na saída de uma invocação manual.
     logger.info("weather.inmet_stations_imported", extra=report.details)
     print(
         f"Estações INMET: {report.details['stations']} estações, "

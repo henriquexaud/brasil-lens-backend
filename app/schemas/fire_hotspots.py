@@ -1,5 +1,3 @@
-"""Contratos de focos INPE: mapa completo em WMS e detalhes sob demanda."""
-
 from datetime import datetime
 from typing import Annotated, Literal
 
@@ -58,7 +56,6 @@ class FireHotspotMetadata(CamelModel):
 class FireHotspotCollection(CamelModel):
     type: Literal["FeatureCollection"] = "FeatureCollection"
     metadata: FireHotspotMetadata
-    # A prévia contém só a detecção mais recente. O WMS desenha a cobertura completa.
     features: list[FireHotspotFeature]
 
 

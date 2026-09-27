@@ -1,5 +1,3 @@
-"""Densidade territorial, janelas, completude de páginas e ausência de área."""
-
 import asyncio
 from datetime import UTC, datetime, timedelta
 

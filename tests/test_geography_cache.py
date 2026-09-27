@@ -1,5 +1,3 @@
-"""A primeira ingestão e novas malhas devem chegar aos derivados do mapa."""
-
 import json
 from unittest.mock import AsyncMock, Mock
 

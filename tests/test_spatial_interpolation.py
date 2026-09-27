@@ -1,5 +1,3 @@
-"""Testes da interpolação espacial de dados climáticos no backend."""
-
 from datetime import UTC, datetime
 
 import pytest
@@ -43,7 +41,6 @@ def test_interpolate_midpoint_averages_temperatures():
     city_a = make_city("A", "Cidade A", -23.0, -46.0, 20.0, weather_code=1)
     city_b = make_city("B", "Cidade B", -23.0, -47.0, 30.0, weather_code=2)
 
-    # Ponto médio exato entre Cidade A e B
     result = interpolate_municipal_weather(
         target_code="MID",
         target_name="Cidade Meio",
@@ -63,7 +60,6 @@ def test_interpolate_near_city_picks_closest_attributes():
     city_a = make_city("A", "Cidade A", -23.0, -46.0, 20.0, weather_code=1)
     city_b = make_city("B", "Cidade B", -23.0, -47.0, 30.0, weather_code=2)
 
-    # Ponto quase idêntico a Cidade A
     result = interpolate_municipal_weather(
         target_code="NEAR_A",
         target_name="Cidade Próxima A",
@@ -91,8 +87,6 @@ def test_interpolate_without_cities_raises():
 
 
 def test_interpolated_city_keeps_timezone_and_time_of_closest_measurement():
-    """A estimativa não pode parecer mais recente que a medição de origem, nem
-    mudar o fuso: o painel exibe o horário da leitura no fuso da cidade."""
     observed = datetime(2026, 9, 21, 15, 0, tzinfo=UTC)
     manaus = make_city("AM", "Manaus", -3.1, -60.0, 31.0).model_copy(
         update={"timezone": "America/Manaus", "observed_at": observed}

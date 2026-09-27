@@ -1,5 +1,3 @@
-"""Recorte territorial e janela temporal compartilhados nas consultas ao INPE."""
-
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,7 +12,6 @@ def iso(value: datetime) -> str:
 
 
 async def scope_filter(session: AsyncSession, level: FireScope, parent: str | None) -> str:
-    # O país é obrigatório: o serviço também publica detecções fora do Brasil.
     if level == "country":
         if parent is not None:
             raise InvalidParameterError("O recorte Brasil não recebe um território pai.", "parent")

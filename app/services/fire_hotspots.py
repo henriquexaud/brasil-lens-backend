@@ -1,10 +1,3 @@
-"""BDQueimadas oficial: WMS para cobertura completa, WFS para consulta pontual.
-
-Schema confirmado em /queimadas/geoserver/wfs (DescribeFeatureType): os
-campos id_0, id_1 e id_2 identificam país, UF e município IBGE, respectivamente.
-Não confunde detecções por satélite com incêndios únicos ou fogo ainda ativo.
-"""
-
 import asyncio
 import math
 from datetime import UTC, datetime, timedelta
@@ -58,7 +51,6 @@ async def get_fire_hotspots(
                 raise ProviderError("INPE temporariamente indisponível. Tente em um minuto.")
             end = datetime.now(UTC)
             cql_filter = _time_filter(scope, end, hours)
-            # Só a prévia vem em JSON. O WMS não tem esse limite e cobre todos os focos.
             features, total = await _fetch_wfs(cql_filter, 1)
             result = FireHotspotCollection(
                 metadata=FireHotspotMetadata(

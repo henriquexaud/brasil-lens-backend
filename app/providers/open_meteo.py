@@ -1,9 +1,3 @@
-"""Condições modeladas e previsão das 27 capitais, em uma única chamada pública.
-
-Contrato: https://open-meteo.com/en/docs. Não são medições de estações.
-Coordenadas aproximadas dos centros urbanos, independentes da ingestão IBGE.
-"""
-
 from datetime import UTC, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -13,7 +7,6 @@ import httpx
 from app.core.errors import ProviderError, ProviderRateLimitedError
 from app.schemas.weather import WeatherCity, WeatherForecastDay
 
-# UF, capital, latitude, longitude.
 CAPITALS = (
     ("AC", "Rio Branco", -9.9754, -67.8249),
     ("AL", "Maceió", -9.6658, -35.7353),
@@ -44,10 +37,6 @@ CAPITALS = (
     ("TO", "Palmas", -10.1840, -48.3336),
 )
 
-# Cota do plano gratuito (600/min, 5.000/h, 10.000/dia por IP). A fonte responde
-# 429 com `{"reason": "Daily API request limit exceeded..."}` e não documenta
-# quando cada janela renova — por isso a espera é um intervalo de sondagem (a
-# próxima consulta real é a sonda), não um horário calculado.
 _RATE_LIMIT_WINDOWS = (
     (
         "minutely",
@@ -102,12 +91,9 @@ async def fetch_locations(
                 "longitude": ",".join(str(city[3]) for city in locations),
                 "current": "temperature_2m,relative_humidity_2m,apparent_temperature,"
                 "precipitation,weather_code,wind_speed_10m",
-                # Chuva por hora nas últimas 48 h: o acumulado que o mapa pinta.
                 "hourly": "precipitation",
                 "past_hours": 48,
                 "forecast_hours": 1,
-                # Mesmo sem previsão, o total e a probabilidade de hoje. Até dez
-                # variáveis a coordenada conta como uma única consulta.
                 "daily": (
                     "weather_code,temperature_2m_max,temperature_2m_min,"
                     "precipitation_probability_max,precipitation_sum"
@@ -137,16 +123,10 @@ async def fetch_locations(
         raise ProviderError("Não foi possível consultar o clima na Open-Meteo.") from exc
 
 
-# Chuvisco, chuva, chuva congelante, pancadas e trovoadas (códigos WMO).
 RAIN_CODES = frozenset({*range(51, 68), *range(80, 83), 95, 96, 99})
 
 
 def _last_48h(hourly: dict[str, Any], until: int) -> float | None:
-    """Soma as 48 horas encerradas até a leitura, sem incluir horas futuras.
-
-    Cada valor da fonte acumula a hora anterior ao timestamp. O ponto exatamente
-    48 h antes da leitura pertence à hora anterior à janela, por isso fica fora.
-    """
     values = [
         value
         for time, value in zip(
@@ -160,7 +140,6 @@ def _last_48h(hourly: dict[str, Any], until: int) -> float | None:
 def _parse_city(raw: dict[str, Any], capital: tuple[str, str, float, float]) -> WeatherCity:
     state, name, latitude, longitude = capital
     current, daily = raw["current"], raw.get("daily", {})
-    # UNIX mantém o instante em UTC; a data diária precisa do fuso da cidade.
     timezone = ZoneInfo(raw["timezone"])
     precip_sums = daily.get("precipitation_sum") or []
     precip_probs = daily.get("precipitation_probability_max") or []

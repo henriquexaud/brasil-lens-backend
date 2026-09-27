@@ -1,5 +1,3 @@
-"""Contratos de território."""
-
 from __future__ import annotations
 
 from pydantic import Field
@@ -7,13 +5,10 @@ from pydantic import Field
 from app.models import TerritoryLevel
 from app.schemas.common import CamelModel, Pagination
 
-# Extensão geográfica no formato do GeoJSON: [oeste, sul, leste, norte].
 BoundingBox = tuple[float, float, float, float]
 
 
 class TerritoryRef(CamelModel):
-    """Referência mínima a outro território (pai, capital)."""
-
     ibge_code: str
     name: str
     level: TerritoryLevel | None = None

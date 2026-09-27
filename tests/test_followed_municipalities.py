@@ -1,10 +1,3 @@
-"""Municípios seguidos — a relação `usuário ↔ município`.
-
-Tudo é integração (`db`): as regras que importam moram no banco (UNIQUE,
-`ON CONFLICT`, CHECK) ou dependem do catálogo de territórios. Cada teste usa
-um `user_id` próprio e a sessão nunca é commitada, então nada sobrevive.
-"""
-
 from __future__ import annotations
 
 import uuid
@@ -48,7 +41,6 @@ async def _require_municipalities(session: AsyncSession) -> None:
 
 @asynccontextmanager
 async def _api(session: AsyncSession, user_id: str) -> AsyncIterator[AsyncClient]:
-    """Cliente HTTP com a sessão do teste (sem commit) e um usuário isolado."""
     from app.api.deps import get_current_user_id, get_session, get_write_session
     from app.main import app
 
@@ -78,13 +70,11 @@ async def test_follow_list_unfollow_round_trip(session: AsyncSession) -> None:
 
     followed, created = await service.follow(session, user, SAO_PAULO)
     assert created
-    # Nome e UF vêm do catálogo por JOIN — não são gravados no vínculo.
     assert (followed.name, followed.state_code, followed.state_abbreviation) == (
         "São Paulo",
         "35",
         "SP",
     )
-    # Notificações começam ligadas: seguir já é o gesto de querer acompanhar.
     assert followed.notifications_enabled is True
 
     await service.follow(session, user, BRASILIA)
@@ -107,7 +97,6 @@ async def test_follow_is_idempotent_and_per_user(session: AsyncSession) -> None:
     assert (first, second) == (True, False)
     assert again.municipality_code == SAO_PAULO
 
-    # A lista de um usuário não enxerga a do outro.
     assert (await service.list_followed(session, bob)).municipalities == []
     assert len((await service.list_followed(session, alice)).municipalities) == 1
 
@@ -115,7 +104,6 @@ async def test_follow_is_idempotent_and_per_user(session: AsyncSession) -> None:
 
 
 async def test_database_refuses_a_duplicate_follow(session: AsyncSession) -> None:
-    """A UNIQUE vale mesmo para quem escreve sem passar pelo serviço."""
     user = _user()
     session.add(FollowedMunicipality(user_id=user, municipality_code=SAO_PAULO))
     await session.flush()
@@ -130,7 +118,6 @@ async def test_only_existing_municipalities_can_be_followed(session: AsyncSessio
     user = _user()
     with pytest.raises(TerritoryNotFoundError):
         await service.follow(session, user, "9999999")
-    # Uma UF existe, mas não é um município.
     with pytest.raises(InvalidParameterError):
         await service.follow(session, user, "35")
     await session.rollback()
@@ -188,10 +175,9 @@ async def test_http_contract(session: AsyncSession) -> None:
         assert missing.status_code == 404
 
         assert (await client.delete(f"{base}/{SAO_PAULO}")).status_code == 204
-        # Deixar de seguir de novo não é erro: o estado pedido já vale.
         assert (await client.delete(f"{base}/{SAO_PAULO}")).status_code == 204
         assert (await client.get(base)).json() == {"municipalities": []}
 
-        assert (await client.put(f"{base}/35")).status_code == 422  # não tem 7 dígitos
+        assert (await client.put(f"{base}/35")).status_code == 422
         assert (await client.put(f"{base}/9999999")).status_code == 404
     await session.rollback()

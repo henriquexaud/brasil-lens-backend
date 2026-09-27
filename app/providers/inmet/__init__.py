@@ -1,1 +1,0 @@
-"""Adaptadores climáticos do INMET."""

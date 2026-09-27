@@ -1,9 +1,3 @@
-"""Agregação completa do WFS: CSV compacto paginado, cache e nenhuma geometria por foco.
-
-Contagens e densidades estaduais e municipais usam os registros
-originais e a área geodésica da malha canônica, nunca o tamanho da geometria simplificada.
-"""
-
 import asyncio
 import math
 from collections import Counter
@@ -29,9 +23,6 @@ _cache: TTLCache[FireSummary] = TTLCache(7200, 32)
 _failures: TTLCache[bool] = TTLCache(60, 32)
 _locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 PAGE_SIZE = 10000
-# Páginas pedidas ao mesmo tempo. Na seca o Brasil passa de 40 mil focos em
-# 48 h: em fila, cada página esperava a anterior; poucas por vez não pressionam
-# o serviço público.
 PAGE_CONCURRENCY = 4
 
 
@@ -103,7 +94,6 @@ async def get_summary(
         hours=2
     ):
         raise InvalidParameterError("Atualize a camada antes de consultar o resumo.", "at")
-    # O filtro WFS trunca para segundos; sem isto a validação de `aggregate` diverge da fonte.
     at = at.replace(microsecond=0)
     scope = await _scope_filter(session, level, parent)
     version = await data_version(session)

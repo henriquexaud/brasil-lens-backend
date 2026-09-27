@@ -1,9 +1,3 @@
-"""Acesso a dados de território.
-
-Repositório devolve linhas/dataclasses. Nenhuma política (o que fazer quando
-não há dado, como classificar) mora aqui — isso é responsabilidade do serviço.
-"""
-
 from __future__ import annotations
 
 import math
@@ -22,8 +16,6 @@ from app.repositories.map_projection import data_version
 
 @dataclass(frozen=True, slots=True)
 class TerritoryRow:
-    """Território com o pai e a capital já resolvidos — evita N+1 no serviço."""
-
     ibge_code: str
     name: str
     level: TerritoryLevel
@@ -69,7 +61,7 @@ def _select_with_relations() -> Select[tuple[Territory, Territory, Territory]]:
 
 
 def _to_row(record: object) -> TerritoryRow:
-    row = record  # tipagem de Row é dinâmica; acessos são por atributo nomeado
+    row = record
     return TerritoryRow(
         ibge_code=row.ibge_code,  # type: ignore[attr-defined]
         name=row.name,  # type: ignore[attr-defined]
@@ -90,14 +82,12 @@ def _to_row(record: object) -> TerritoryRow:
 
 
 def _search_terms(search: str) -> tuple[str, ColumnElement[Any], ColumnElement[Any]]:
-    """Termo normalizado e as colunas comparáveis a ele (nome e sigla sem acento)."""
     name_col = func.coalesce(Territory.normalized_name, func.lower(Territory.name))
     abbr_col = func.coalesce(Territory.normalized_abbreviation, func.lower(Territory.abbreviation))
     return normalize_text(search), name_col, abbr_col
 
 
 def _search_filter(search: str) -> ColumnElement[bool]:
-    """Casa o termo no nome, a sigla exata ou o início da sigla."""
     clean, name_col, abbr_col = _search_terms(search)
     return or_(
         name_col.contains(clean, autoescape=True),
@@ -107,14 +97,12 @@ def _search_filter(search: str) -> ColumnElement[bool]:
 
 
 async def get_by_code(session: AsyncSession, ibge_code: str) -> TerritoryRow | None:
-    """Busca por código IBGE — o identificador canônico da API pública."""
     stmt = _select_with_relations().where(Territory.ibge_code == ibge_code)
     record = (await session.execute(stmt)).first()
     return _to_row(record) if record is not None else None
 
 
 async def get_weather_point(session: AsyncSession, ibge_code: str) -> tuple[float, float] | None:
-    """Ponto interno da malha municipal: evita consultar no mar ou fora do território."""
     point = func.ST_PointOnSurface(TerritoryGeometry.geom)
     stmt = (
         select(func.ST_Y(point), func.ST_X(point))
@@ -128,7 +116,6 @@ async def get_weather_point(session: AsyncSession, ibge_code: str) -> tuple[floa
 async def get_identity_by_code(
     session: AsyncSession, ibge_code: str
 ) -> tuple[int, TerritoryLevel] | None:
-    """Resolve o ID interno e o nível em uma consulta, sem carregar relações."""
     stmt = select(Territory.id, Territory.level).where(Territory.ibge_code == ibge_code)
     row = (await session.execute(stmt)).first()
     return (row.id, row.level) if row is not None else None
@@ -148,7 +135,6 @@ async def list_territories(
     limit: int = 100,
     offset: int = 0,
 ) -> list[TerritoryRow]:
-    """Listagem paginada. Usa ix_territories_level_name / ix_territories_parent_id_name."""
     parent_filter = aliased(Territory, name="parent_filter")
     stmt = _select_with_relations()
 
@@ -162,13 +148,6 @@ async def list_territories(
         clean, name_col, abbr_col = _search_terms(search)
         stmt = stmt.where(_search_filter(search))
 
-        # Pontuação de relevância (menor score = maior prioridade):
-        # 0: Sigla exata ("SP")
-        # 1: Nome exato ("sao paulo")
-        # 2: Nome começa com termo ("sao")
-        # 3: Palavra no meio do nome começa com o termo ("paulo" em "São Paulo")
-        # 4: Sigla começa com o termo
-        # 5: Termo contido no meio do nome
         score = case(
             (abbr_col == clean, 0),
             (name_col == clean, 1),
@@ -213,17 +192,8 @@ async def count_territories(
 async def children_summary(
     session: AsyncSession, ibge_code: str
 ) -> tuple[int, TerritoryLevel | None]:
-    """Quantidade e nível dos filhos diretos, em uma única passada.
-
-    Contagem em vez de coluna desnormalizada: com ix_territories_parent_id_name
-    é um index scan sobre poucos milhares de linhas e não há risco de divergir
-    do que está gravado. Contagem e nível vêm juntos porque sempre são usados
-    juntos — eram duas queries para a mesma varredura.
-    """
     parent = aliased(Territory, name="parent")
     stmt = (
-        # Todos os filhos diretos compartilham o mesmo nível, então MIN()
-        # apenas o extrai junto com a contagem, sem uma segunda varredura.
         select(func.count().label("total"), func.min(Territory.level).label("child_level"))
         .select_from(Territory)
         .join(parent, Territory.parent_id == parent.id)

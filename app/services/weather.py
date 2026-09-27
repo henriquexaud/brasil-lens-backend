@@ -1,14 +1,3 @@
-"""Regras de apresentação da camada meteorológica.
-
-Curto de propósito: ao contrário de `services/map.py`, não há `latest` para
-resolver nem estatística — uma estação mostra sua **última** leitura (já
-resolvida em `repositories/weather.py` via `LATERAL`), e um alerta é ativo ou
-não aparece. A única classificação daqui é a de alertas: `category` e
-`severity_level` traduzem o vocabulário de cada fonte (INMET, CEMADEN) para
-um esquema comum que o frontend consome sem precisar conhecer nenhuma das
-duas (`_category_for`/`_severity_level_for`).
-"""
-
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -34,9 +23,6 @@ from app.schemas.weather import (
     WeatherStationProperties,
 )
 
-# Apenas avisos/alertas oficiais são ingeridos automaticamente. Condições e
-# previsão são consultadas em services/weather_forecast.py, com cache
-# independente.
 _SOURCE_DEFINITIONS: tuple[tuple[str, str, str, str | None], ...] = (
     ("import_weather_inmet_alerts", "inmet_alerts", "INMET — Avisos Meteorológicos", None),
     (
@@ -47,9 +33,6 @@ _SOURCE_DEFINITIONS: tuple[tuple[str, str, str, str | None], ...] = (
     ),
 )
 
-# Categoria comum: hoje é 100% função da fonte (o INMET só emite fenômeno
-# meteorológico; o CEMADEN só emite risco geo-hidrológico) — sem ambiguidade
-# real que justifique guardar isto como coluna (ver app/models/weather.py).
 _CATEGORY_BY_PROVIDER: dict[str, WeatherAlertCategory] = {
     "cemaden": WeatherAlertCategory.GEO_HYDROLOGICAL,
 }
@@ -60,10 +43,6 @@ def _category_for(provider: str) -> WeatherAlertCategory:
 
 
 def _severity_level_for(provider: str, severity: str) -> WeatherAlertSeverityLevel:
-    """Classificação comum de severidade em 4 níveis normalizados:
-    Moderado, Alto, Muito alto e Extremo.
-    Vocabulário por fonte mapeado para uma escala visual comum.
-    """
     text = (severity or "").strip().lower()
     if provider == "cemaden":
         if "muito alto" in text:
@@ -75,7 +54,6 @@ def _severity_level_for(provider: str, severity: str) -> WeatherAlertSeverityLev
         if "moderado" in text:
             return WeatherAlertSeverityLevel.MODERATE
         return WeatherAlertSeverityLevel.MODERATE
-    # INMET: "grande perigo" -> EXTREME, "perigo" -> HIGH, "potencial" -> MODERATE
     if "grande perigo" in text or "extremo" in text:
         return WeatherAlertSeverityLevel.EXTREME
     if "muito alto" in text:
@@ -87,14 +65,8 @@ def _severity_level_for(provider: str, severity: str) -> WeatherAlertSeverityLev
     return WeatherAlertSeverityLevel.MODERATE
 
 
-# Uma fonte sem execução bem-sucedida há mais que isto (múltiplo da cadência
-# esperada) deixa de ser "ok" — tolera um ciclo perdido sem virar alarme falso.
 _STALE_MULTIPLIER = 3
 
-# TTL curto de propósito: o dado já é barato de ler (Postgres, não a fonte
-# externa — ver docstring do módulo). Isto só evita reler a cada poll do
-# frontend (`refetchInterval`) durante picos de tráfego, não substitui o
-# scheduler como mecanismo de frescor.
 _STATIONS_CACHE_KEY = "stations"
 _ALERTS_CACHE_KEY = "alerts"
 _stations_cache: TTLCache[WeatherStationCollection] = TTLCache(
@@ -197,14 +169,6 @@ def _status_for(
     frequency_seconds: int,
     zero_output_key: str | None,
 ) -> tuple[WeatherSourceStatusValue, datetime | None]:
-    """`unavailable` cobre "nunca rodou", "rodou e falhou" e "rodou, disse que
-    teve sucesso, mas não produziu o que deveria produzir" com o mesmo
-    rótulo: das três perspectivas do frontend, não há dado confiável para
-    mostrar. `stale` existe separado de `unavailable` porque uma fonte que só
-    está atrasada (ciclo perdido) é uma situação diferente de uma fonte sem
-    produção real (ver `app/providers/inmet/stations.py` e o comentário em
-    `_SOURCE_DEFINITIONS`).
-    """
     if row is None or row.finished_at is None or row.status == "failed":
         return WeatherSourceStatusValue.UNAVAILABLE, None
 

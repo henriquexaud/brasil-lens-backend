@@ -1,5 +1,3 @@
-"""Round-trip tipado, expiração explícita e indisponibilidade não fatal."""
-
 from unittest.mock import AsyncMock
 
 from redis.exceptions import ConnectionError

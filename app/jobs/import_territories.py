@@ -1,18 +1,3 @@
-"""Importa a hierarquia territorial do IBGE Localidades.
-
-`python -m app.jobs.import_territories`
-
-Fluxo: consultar → validar (Pydantic no provider) → converter para
-`TerritoryRecord` → normalizar → upsert → registrar.
-
-**Idempotência** vem do UNIQUE(ibge_code): o upsert atualiza nome, sigla e pai
-do território existente. Rodar duas vezes não cria linha nova — e é isso que
-permite reexecutar a ingestão quando o IBGE cria ou renomeia um município.
-
-A ordem é obrigatória (país → região → UF → município) porque `parent_id` é uma
-FK real: o pai precisa existir antes do filho.
-"""
-
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -35,7 +20,6 @@ logger = get_logger(__name__)
 
 JOB_NAME = "import_territories"
 
-# 7 binds por linha; o asyncpg aceita no máximo 32767 parâmetros por consulta.
 UPSERT_BATCH_SIZE = 4000
 
 
@@ -45,7 +29,6 @@ async def _upsert_level(
     *,
     report: RunReport,
 ) -> int:
-    """Upsert de um nível inteiro, resolvendo `parent_id` pelo código IBGE."""
     if not records:
         return 0
 
@@ -64,8 +47,6 @@ async def _upsert_level(
         if record.parent_ibge_code:
             parent_id = parent_ids.get(record.parent_ibge_code)
             if parent_id is None:
-                # Não criamos território-fantasma: um pai ausente é um defeito
-                # de ordem de execução e precisa ser visível.
                 report.record_failure(
                     f"territory:{record.ibge_code}",
                     f"pai '{record.parent_ibge_code}' não encontrado",
@@ -109,13 +90,6 @@ async def _upsert_level(
 
 
 async def _link_capitals(session: AsyncSession, report: RunReport) -> int:
-    """Liga cada UF (e o país) ao município que é sua capital.
-
-    A API Localidades não marca capitais, então o mapeamento é dado de
-    referência estático (`providers/ibge/reference.py`). Aqui ele é **validado**:
-    um código de capital que não exista entre os municípios importados derruba o
-    job em vez de gravar FK inconsistente.
-    """
     wanted = {*STATE_CAPITALS.values(), COUNTRY_CAPITAL}
     rows = await session.execute(
         select(Territory.ibge_code, Territory.id).where(Territory.ibge_code.in_(wanted))
@@ -165,7 +139,6 @@ async def main() -> int:
         await session.commit()
 
         async with http_client() as client:
-            # Ordem obrigatória: parent_id é FK real.
             country = [localidades.country_record()]
             regions = await localidades.fetch_regions(client)
             states = await localidades.fetch_states(client)

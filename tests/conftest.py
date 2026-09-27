@@ -1,14 +1,3 @@
-"""Configuração dos testes.
-
-Há duas classes de teste, de propósito:
-
-* **unitários** — normalização de fontes ambientais, cache e regras de clima.
-  Rodam sem banco e sem rede, a partir de fixtures das fontes.
-* **integração** (`@pytest.mark.db`) — persistência e consultas espaciais.
-  Precisam de PostgreSQL/PostGIS; são puladas com mensagem clara
-  quando o banco não está acessível.
-"""
-
 from __future__ import annotations
 
 import json
@@ -33,14 +22,11 @@ def load_fixture(name: str) -> Any:
 
 @pytest.fixture(autouse=True)
 def isolate_shared_cache(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Fixtures de fontes externas não podem ler/gravar o cache da aplicação local.
-    # Os testes de Redis injetam seu próprio cliente em memória.
     monkeypatch.setattr(settings, "redis_url", None)
 
 
 @pytest.fixture(autouse=True)
 def reset_source_cooldowns() -> None:
-    # Uma fonte "fora do ar" num teste não pode silenciar a fonte no seguinte.
     cooldown.reset_all()
 
 
@@ -51,12 +37,10 @@ def anyio_backend() -> str:
 
 @pytest_asyncio.fixture
 async def session() -> AsyncIterator[AsyncSession]:
-    """Sessão de banco para os testes marcados com `db`."""
     engine = create_async_engine(settings.database_url, poolclass=None)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     try:
         async with factory() as db_session:
-            # Falha cedo e com mensagem útil se não houver banco.
             from sqlalchemy import text
 
             try:

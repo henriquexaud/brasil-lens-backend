@@ -1,22 +1,16 @@
-"""Ambiente do Alembic.
-
-A URL vem sempre de `DATABASE_URL` (via Settings) — nunca do alembic.ini — para
-que migration e aplicação não possam divergir de banco.
-"""
-
 from __future__ import annotations
 
 import asyncio
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 from sqlalchemy.pool import NullPool
 
+from alembic import context
 from app.core.config import settings
 from app.db.base import Base
-from app.models import *  # noqa: F401,F403  (popula o metadata)
+from app.models import *  # noqa: F403  (popula o metadata)
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_url)
@@ -28,7 +22,6 @@ target_metadata = Base.metadata
 
 
 def _include_object(obj: object, name: str | None, type_: str, *_: object) -> bool:
-    """Ignora as tabelas internas do PostGIS no autogenerate."""
     if type_ == "table" and name in {"spatial_ref_sys", "geography_columns", "geometry_columns"}:
         return False
     return True

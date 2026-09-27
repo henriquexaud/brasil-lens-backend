@@ -1,12 +1,3 @@
-"""Caso de uso do mapa: malha territorial, política de LOD e cache.
-
-Regras de negócio do mapa base:
-* política de LOD por nível territorial (overview vs detail);
-* validação de compatibilidade entre `level` e `parent`;
-* caching em memória local e no Redis da malha GeoJSON serializada;
-* bounding box do escopo territorial.
-"""
-
 from __future__ import annotations
 
 import orjson
@@ -29,8 +20,6 @@ from app.schemas.map import (
 
 logger = get_logger(__name__)
 
-# Política de detalhe: país e regiões usam a geometria mais agressiva. UFs e
-# municípios usam a intermediária.
 _DEFAULT_LOD: dict[TerritoryLevel, GeometryLOD] = {
     TerritoryLevel.COUNTRY: GeometryLOD.OVERVIEW,
     TerritoryLevel.REGION: GeometryLOD.OVERVIEW,
@@ -54,7 +43,6 @@ def clear_cache() -> None:
 
 
 async def data_version(session: AsyncSession) -> int:
-    """Versão dos dados do mapa: muda a cada ingestão de territórios ou malhas."""
     return await map_repo.data_version(session)
 
 
@@ -65,7 +53,6 @@ def projection_key(
     lod: GeometryLOD | None,
     version: int,
 ) -> str:
-    """Identidade de uma projeção da malha: chave do Redis e base do ETag."""
     return ":".join(
         (
             level.value,
@@ -178,7 +165,6 @@ async def get_map(
 def _scope_bbox(
     features: list[map_repo.MapFeatureRow],
 ) -> tuple[float, float, float, float] | None:
-    """Bounding box que engloba todas as features do escopo."""
     w_list = [f.bbox[0] for f in features if f.bbox[0] is not None]
     s_list = [f.bbox[1] for f in features if f.bbox[1] is not None]
     e_list = [f.bbox[2] for f in features if f.bbox[2] is not None]

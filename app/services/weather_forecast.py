@@ -1,25 +1,3 @@
-"""Clima sob demanda: uma leitura por município, compartilhada por todas as rotas.
-
-A Open-Meteo conta cada coordenada como uma consulta — um lote de 20 municípios
-gasta 20 da cota. Por isso a unidade de cache é a leitura de cada município,
-não o lote: capitais, amostra do estado, lotes, área visível e seleção resolvem
-os mesmos pontos em memória → Redis → fonte, e só o que falta vai à
-Open-Meteo, numa chamada. A capital lida no mapa do Brasil é a mesma leitura
-do município quando ele é selecionado; a média de cada UF no Brasil usa o
-começo da amostra do estado, e a amostra é reaproveitada pelo zoom.
-
-Frescor segue a cadência da fonte, cujas condições atuais mudam a cada 15
-minutos: a cidade selecionada vale até o próximo intervalo; as camadas do mapa
-valem 30 minutos, porque ali a estimativa já erra mais do que a variação em 15
-minutos. Vencida, a leitura continua sendo servida enquanto é renovada em
-segundo plano, por até duas horas. Com a fonte fora do ar ou sem cota, vale
-até doze horas, marcada como dado anterior — melhor que um mapa vazio.
-
-No zoom próximo a medição acompanha a escala (`_cell_size`): uma leitura por
-célula da grade, estimando os vizinhos a partir dela, e todos os municípios só
-quando a área visível é pequena.
-"""
-
 import asyncio
 import math
 import time
@@ -54,36 +32,24 @@ from app.schemas.weather import (
 )
 from app.services.spatial_interpolation import interpolate_municipal_weather
 
-# Código IBGE, nome, UF, latitude, longitude.
 Point = tuple[str, str, str, float, float]
 Variant = Literal["current", "forecast"]
 
 OPEN_METEO_URL = "https://api.open-meteo.com"
 SELECTED_FRESHNESS = timedelta(minutes=15)
 MAP_FRESHNESS = timedelta(minutes=30)
-# Depois de uma consulta, a próxima espera ao menos isto: se a fonte ainda não
-# publicou o intervalo seguinte, não adianta perguntar de novo em seguida.
 MIN_FRESHNESS_AFTER_FETCH = timedelta(minutes=2)
-# Botão "Atualizar dados": abaixo disto, o clique é ignorado (o dado já é
-# recente o bastante); a partir disto, força a busca na hora em vez de só
-# agendar a renovação em segundo plano (ver `_resolve`).
 FORCE_MIN_AGE = timedelta(minutes=5)
 MAX_DATA_AGE = timedelta(hours=2)
 MAX_FALLBACK_AGE = timedelta(hours=12)
 FUTURE_TOLERANCE = timedelta(minutes=15)
 READING_TTL_SECONDS = int(MAX_FALLBACK_AGE.total_seconds())
 READINGS_NAMESPACE = "weather-reading-v2"
-# Municípios medidos de fato por estado; os demais são interpolados (IDW).
 STATE_SAMPLE_SIZE = 20
-# Mapa do Brasil: cada UF é medida em pontos espalhados pelo território, um a
-# cada ~60 mil km², de 2 a 8 — o Amazonas pede mais leituras que Sergipe. São
-# os primeiros da mesma amostra (a capital é o primeiro), reaproveitados
-# quando a UF é aberta.
 NATIONAL_KM2_PER_POINT = 60_000
 NATIONAL_MIN_POINTS = 2
 NATIONAL_MAX_POINTS = 8
 STATE_RESPONSE_SECONDS = 60
-# Coordenadas por chamada HTTP à fonte: a URL cresce com cada uma.
 FETCH_CHUNK = 100
 
 CAPITAL_IBGE_CODES = {
@@ -118,15 +84,11 @@ CAPITAL_IBGE_CODES = {
 
 
 class WeatherReading(BaseModel):
-    """Condições de um município e o instante em que foram consultadas."""
-
     fetched_at: datetime
     city: WeatherCity
 
 
 class _NationalSample(NamedTuple):
-    """Pontos medidos de uma UF no mapa do Brasil e a área (km²) de cada um."""
-
     abbreviation: str
     name: str
     points: list[Point]
@@ -135,17 +97,11 @@ class _NationalSample(NamedTuple):
 
 _readings: TTLCache[WeatherReading] = TTLCache(READING_TTL_SECONDS, 12_000)
 _state_responses: TTLCache[WeatherCurrentResponse] = TTLCache(STATE_RESPONSE_SECONDS, 64)
-# Consulta em curso por ponto: quem pede o mesmo município espera por ela.
 _inflight: dict[tuple[Variant, str], asyncio.Task[dict[str, WeatherReading]]] = {}
-# Célula → município medido, por (UF, tamanho da célula).
 _representatives: dict[tuple[str, float], dict[tuple[int, int], str]] = {}
-# Amostra e pesos de cada UF no mapa do Brasil, por sigla: dependem só da malha.
 _national_samples: dict[str, _NationalSample] = {}
 _geography_version: int | None = None
-# Falha da fonte pausa as consultas por um minuto; ver app/core/cooldown.py.
 open_meteo_cooldown = SourceCooldown("open_meteo", 60)
-# Cota da fonte esgotada (HTTP 429): enquanto vale, nenhuma consulta sai. É
-# global porque a cota é da aplicação (IP), e a espera vem da própria fonte.
 _rate_limited_until = 0.0
 _rate_limit_error: ProviderRateLimitedError | None = None
 logger = get_logger(__name__)
@@ -191,7 +147,6 @@ def _key(variant: Variant, code: str) -> str:
 
 
 async def _load(keys: list[str], now: datetime, freshness: timedelta) -> dict[str, WeatherReading]:
-    """Memória primeiro; o Redis completa o que falta ou venceu (outro processo renovou)."""
     found = {key: reading for key in keys if (reading := _readings.get(key)) is not None}
     pending = [key for key in keys if key not in found or not _is_fresh(found[key], now, freshness)]
     shared = await redis_cache.read_many(READINGS_NAMESPACE, pending, WeatherReading)
@@ -244,7 +199,6 @@ async def _fetch_and_store(points: list[Point], variant: Variant) -> dict[str, W
         fetched[point[0]] = reading
         stored[_key(variant, point[0])] = reading
         if variant == "forecast":
-            # A previsão traz as condições atuais: a seleção seguinte não consulta de novo.
             stored[_key("current", point[0])] = WeatherReading(
                 fetched_at=now, city=reading.city.model_copy(update={"forecast": []})
             )
@@ -253,8 +207,6 @@ async def _fetch_and_store(points: list[Point], variant: Variant) -> dict[str, W
 
 
 def _start_fetch(points: list[Point], variant: Variant) -> asyncio.Task[dict[str, WeatherReading]]:
-    """Inicia uma consulta desacoplada de quem pediu: um cliente que desiste
-    não cancela a leitura que outros esperam, e o resultado fica no cache."""
     task = asyncio.create_task(_fetch_and_store(points, variant))
     keys = [(variant, point[0]) for point in points]
     for key in keys:
@@ -265,7 +217,7 @@ def _start_fetch(points: list[Point], variant: Variant) -> asyncio.Task[dict[str
             if _inflight.get(key) is done:
                 del _inflight[key]
         if not done.cancelled():
-            done.exception()  # quem esperava já tratou; evita o aviso de exceção não lida
+            done.exception()
 
     task.add_done_callback(finished)
     return task
@@ -274,7 +226,6 @@ def _start_fetch(points: list[Point], variant: Variant) -> asyncio.Task[dict[str
 async def _fetch(
     points: list[Point], variant: Variant
 ) -> tuple[dict[str, WeatherReading], ProviderError | None]:
-    """Consulta os pontos, reaproveitando os que outra requisição já está buscando."""
     waiting: dict[asyncio.Task[dict[str, WeatherReading]], list[str]] = {}
     new: list[Point] = []
     for point in points:
@@ -303,18 +254,6 @@ async def _resolve(
     *,
     force: bool = False,
 ) -> tuple[dict[str, WeatherReading], bool]:
-    """Leituras dos pontos e se alguma delas é um dado anterior.
-
-    Frescas saem do cache; vencidas (até duas horas) também, renovadas em
-    segundo plano; ausentes são consultadas agora. Se a fonte falha, vale o
-    último dado de até doze horas. Sem nenhuma leitura, a falha sobe com a
-    causa real.
-
-    `force` é só o botão "Atualizar dados": com a última busca há menos de
-    `FORCE_MIN_AGE`, o pedido é ignorado (dado já recente, mesma resposta de
-    sempre); passado isso, a leitura é buscada agora — não só agendada em
-    segundo plano — para o próprio clique já devolver o dado novo.
-    """
     now = datetime.now(UTC)
     known = await _load([_key(variant, point[0]) for point in points], now, freshness)
     usable: dict[str, WeatherReading] = {}
@@ -352,13 +291,11 @@ async def _resolve(
     if renew and not _source_failing():
         _start_fetch(renew, variant)
     elif renew:
-        # A fonte está falhando: a leitura vencida é o dado anterior possível.
         outdated = True
     return usable, outdated
 
 
 async def _peek(points: list[Point]) -> dict[str, WeatherReading]:
-    """Leituras já guardadas destes pontos, sem consultar a fonte."""
     now = datetime.now(UTC)
     known = await _load([_key("current", point[0]) for point in points], now, MAP_FRESHNESS)
     result: dict[str, WeatherReading] = {}
@@ -375,7 +312,6 @@ def _response(
     outdated: bool,
     next_offset: int | None = None,
 ) -> WeatherCurrentResponse:
-    # A resposta é tão recente quanto a leitura mais antiga que a compõe.
     fetched_at = min((reading.fetched_at for reading in readings), default=datetime.now(UTC))
     return WeatherCurrentResponse(
         fetched_at=fetched_at,
@@ -394,7 +330,6 @@ async def _capitals(
     points: list[Point], variant: Variant, *, force: bool = False
 ) -> WeatherCurrentResponse:
     readings, outdated = await _resolve(points, MAP_FRESHNESS, variant, force=force)
-    # No mapa do Brasil a capital representa a UF e é identificada pela sigla.
     found = [point for point in points if point[0] in readings]
     cities = [
         readings[point[0]].city.model_copy(update={"id": point[2], "name": point[1]})
@@ -406,21 +341,16 @@ async def _capitals(
 async def get_current(
     *, include_forecast: bool = True, force: bool = False
 ) -> WeatherCurrentResponse:
-    """As 27 capitais de uma vez: a primeira etapa do mapa do Brasil."""
     points = [_capital_point(capital) for capital in CAPITALS]
     return await _capitals(points, "forecast" if include_forecast else "current", force=force)
 
 
 def _sample_size(area_km2: float, municipalities: int) -> int:
-    """Pontos medidos de uma UF no mapa do Brasil, pela área do território."""
     wanted = round(area_km2 / NATIONAL_KM2_PER_POINT)
     return min(municipalities, max(NATIONAL_MIN_POINTS, min(NATIONAL_MAX_POINTS, wanted)))
 
 
 def _area_weights(points: list[Point], sample: list[Point], area: dict[str, float]) -> list[float]:
-    """Área (km²) que cada ponto medido representa: cada município soma a sua ao
-    ponto medido mais próximo — os polígonos de Thiessen, o método clássico da
-    chuva média de uma região, aqui sobre a malha municipal."""
     cos_lat = math.cos(math.radians(sum(point[3] for point in points) / len(points)))
     weights = [0.0] * len(sample)
     for code, _, _, lat, lon in points:
@@ -430,7 +360,6 @@ def _area_weights(points: list[Point], sample: list[Point], area: dict[str, floa
 
 
 async def _national_sample(session: AsyncSession) -> list[_NationalSample]:
-    """Pontos e pesos de cada UF, recalculados quando a ingestão atualiza a malha."""
     await _refresh_geography(session)
     if not _national_samples:
         area = {
@@ -449,13 +378,11 @@ async def _national_sample(session: AsyncSession) -> list[_NationalSample]:
             samples[abbreviation] = _NationalSample(
                 abbreviation, state.name, sample, _area_weights(points, sample, area)
             )
-        # De uma vez: uma consulta concorrente nunca vê só parte das UFs.
         _national_samples.update(samples)
     return list(_national_samples.values())
 
 
 def _weighted_mean(pairs: list[tuple[float, float]]) -> float | None:
-    """Média ponderada; sem área conhecida (peso zero), a média simples."""
     if not pairs:
         return None
     total = sum(weight for weight, _ in pairs)
@@ -467,13 +394,6 @@ def _weighted_mean(pairs: list[tuple[float, float]]) -> float | None:
 def _state_average(
     sample: _NationalSample, readings: dict[str, WeatherReading]
 ) -> WeatherCity | None:
-    """A UF como a média dos seus pontos, cada um pesando a área que representa.
-
-    Temperatura, umidade, vento e chuva acumulada são médias; o céu é o que
-    cobre a maior área; chance de chuva e "chovendo agora" valem para a UF se
-    valem para algum ponto dela. Um ponto sem leitura sai da conta e os demais
-    dividem o peso: sem nenhum além da capital, a UF volta a ser a capital.
-    """
     measured = [
         (weight, readings[point[0]].city)
         for point, weight in zip(sample.points, sample.weights, strict=True)
@@ -487,7 +407,6 @@ def _state_average(
         values = [(weight, getattr(city, field)) for weight, city in measured]
         return _weighted_mean([(weight, value) for weight, value in values if value is not None])
 
-    # Área sob cada céu; no empate, o da capital (o primeiro ponto).
     sky: dict[int, float] = {}
     for weight, city in measured:
         if city.weather_code is not None:
@@ -497,13 +416,11 @@ def _state_average(
         for city in cities
         if city.precipitation_probability_pct is not None
     ]
-    # A pílula continua na capital, onde a primeira etapa (só as capitais) a pôs.
     capital = readings.get(CAPITAL_IBGE_CODES[sample.abbreviation])
     return (capital.city if capital else cities[0]).model_copy(
         update={
             "id": sample.abbreviation,
             "name": sample.name,
-            # Tão recente quanto o ponto mais antigo.
             "observed_at": min(city.observed_at for city in cities),
             "temperature_c": mean("temperature_c"),
             "apparent_temperature_c": mean("apparent_temperature_c"),
@@ -526,13 +443,6 @@ def _state_average(
 async def get_states_weather(
     session: AsyncSession, *, force: bool = False
 ) -> WeatherCurrentResponse:
-    """Cada UF no mapa do Brasil: a média dos seus pontos, ponderada pela área.
-
-    A capital sozinha daria a todo o Amazonas o clima de Manaus, e chuva é
-    local: um ponto seco diria "sem chuva" para o estado inteiro. Os pontos são
-    os primeiros da amostra de dispersão da UF — a capital, já lida na primeira
-    etapa do mapa, e os mais afastados dela —, que o clima do estado reaproveita.
-    """
     samples = await _national_sample(session)
     readings, outdated = await _resolve(
         [point for sample in samples for point in sample.points], MAP_FRESHNESS, force=force
@@ -549,7 +459,6 @@ async def get_territory_current(
         raise TerritoryNotFoundError(code)
     variant: Variant = "forecast" if include_forecast else "current"
     if territory.level == TerritoryLevel.STATE:
-        # Estado não tem um único clima: mostramos explicitamente sua capital.
         capital = next((c for c in CAPITALS if c[0] == territory.abbreviation), None)
         if capital is None:
             raise InvalidParameterError("Capital não encontrada para este estado.")
@@ -575,7 +484,6 @@ async def get_territory_current(
 
 
 async def _state_points(session: AsyncSession, parent: str) -> tuple[str, list[Point]]:
-    """UF e municípios do estado, já ordenados por dispersão espacial."""
     await _refresh_geography(session)
     state = await territories.get_by_code(session, parent)
     if state is None:
@@ -617,14 +525,10 @@ async def get_state_weather(
     session: AsyncSession, parent: str, *, force: bool = False
 ) -> WeatherCurrentResponse:
     abbreviation, points = await _state_points(session, parent)
-    # O botão "Atualizar dados" não pode ser respondido por este cache de
-    # instantes: ele não sabe se a leitura por trás já passou de `FORCE_MIN_AGE`.
     if not force and (cached := _state_responses.get(parent)) is not None:
         return cached
     if not points:
         return WeatherCurrentResponse(fetched_at=datetime.now(UTC), cities=[])
-    # Os primeiros pontos da ordem de dispersão formam a amostra medida; o
-    # restante é estimado a partir dela.
     sample = points[:STATE_SAMPLE_SIZE]
     readings, outdated = await _resolve(sample, MAP_FRESHNESS, force=force)
     measured = {
@@ -637,23 +541,15 @@ async def get_state_weather(
     ]
     response = _response(cities, readings.values(), outdated)
     if not outdated:
-        # Por instantes só: a validade real é a de cada leitura da amostra.
         _state_responses.set(parent, response)
     return response
 
 
 _CELL_SIZES = (1.0, 0.5, 0.25, 0.1)
-# Teto de medições por área visível: acima dele a grade engrossa, então quanto
-# mais denso o recorte, menos municípios medidos (os demais são estimados).
 MAX_MEASURED_PER_VIEW = 80
 
 
 def _cell_size(zoom: int, bbox: tuple[float, float, float, float]) -> float:
-    """Graus por célula medida: a densidade acompanha a escala; de perto, todos.
-
-    A extensão da área também conta, para uma tela muito grande (ou um bbox
-    montado à mão) não medir milhares de municípios num zoom alto.
-    """
     span = max(bbox[2] - bbox[0], bbox[3] - bbox[1])
     if zoom >= 10 and span <= 3:
         return 0.0
@@ -669,12 +565,6 @@ def _cell(latitude: float, longitude: float, size: float) -> tuple[int, int]:
 def _cell_representatives(
     state: str, points: list[Point], size: float
 ) -> dict[tuple[int, int], str]:
-    """Município medido de cada célula, estável entre usuários e movimentos do mapa.
-
-    Preferência, nesta ordem: a amostra do estado (já medida ao abrir a UF), o
-    medido da célula maior que contém esta (já medido no zoom anterior) e, na
-    falta dos dois, o município mais próximo do centro da célula.
-    """
     cache_key = (state, size)
     if (cached := _representatives.get(cache_key)) is not None:
         return cached
@@ -710,8 +600,6 @@ async def get_viewport_current(
     visible = await viewport_repo.weather_points(session, bbox, parent=parent)
     if not visible:
         return WeatherCurrentResponse(fetched_at=datetime.now(UTC), cities=[])
-    # Posições e amostra de cada UF da área (cache em processo): as mesmas
-    # coordenadas do clima do estado, para a estimativa coincidir com a dele.
     abbreviations = {code[:2]: uf for code, _, uf, _, _ in visible}
     state_points: dict[str, list[Point]] = {}
     for state, uf in abbreviations.items():
@@ -721,7 +609,6 @@ async def get_viewport_current(
     area = [position.get(code, (code, name, uf, lat, lon)) for code, name, uf, lat, lon in visible]
 
     size = _cell_size(zoom, bbox)
-    # Área densa: a grade engrossa até caber no teto de medições.
     for coarser in (value for value in sorted(_CELL_SIZES) if value > size):
         if len({_cell(p[3], p[4], size) for p in area} if size else area) <= MAX_MEASURED_PER_VIEW:
             break
@@ -737,7 +624,6 @@ async def get_viewport_current(
     else:
         to_measure = area
     readings, outdated = await _resolve(to_measure, MAP_FRESHNESS, force=force)
-    # Amostra do estado e municípios já lidos por outras rotas entram de graça.
     sample = [point for points in state_points.values() for point in points[:STATE_SAMPLE_SIZE]]
     known = {**await _peek([p for p in sample + area if p[0] not in readings]), **readings}
     base = [reading.city for reading in known.values()]
@@ -751,7 +637,6 @@ async def get_viewport_current(
 
 
 async def _refresh_geography(session: AsyncSession) -> None:
-    """Amostras e grades compartilham a versão da malha, inclusive após o bootstrap."""
     global _geography_version
     version = await data_version(session)
     if version != _geography_version:
@@ -762,7 +647,6 @@ async def _refresh_geography(session: AsyncSession) -> None:
 
 
 def reset_state() -> None:
-    """Esquece leituras, consultas e pausas — usado pelos testes."""
     global _rate_limited_until, _rate_limit_error, _geography_version
     _readings.clear()
     _state_responses.clear()

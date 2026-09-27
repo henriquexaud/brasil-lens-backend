@@ -1,9 +1,3 @@
-"""Registro de execuções de ingestão.
-
-Escopo deliberadamente pequeno: responde "de onde veio, quando entrou, deu certo?"
-sem virar plataforma de jobs nem data lineage.
-"""
-
 from __future__ import annotations
 
 import enum
@@ -29,8 +23,6 @@ from app.db.base import Base, TimestampMixin
 
 
 class Dataset(Base, TimestampMixin):
-    """Proveniência de um conjunto de valores ou malhas geoespaciais."""
-
     __tablename__ = "datasets"
 
     id: Mapped[int] = mapped_column(SmallInteger, Identity(), primary_key=True)
@@ -49,8 +41,6 @@ class Dataset(Base, TimestampMixin):
 class IngestionStatus(str, enum.Enum):
     RUNNING = "running"
     SUCCEEDED = "succeeded"
-    # `PARTIAL` é essencial: cada escopo (UF, dataset) commita separadamente, e
-    # perder 24 UFs porque 3 falharam seria pior que registrar sucesso parcial.
     PARTIAL = "partial"
     FAILED = "failed"
 
@@ -87,8 +77,6 @@ class IngestionRun(Base):
     records_failed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     error: Mapped[str | None] = mapped_column(Text)
-    # Contagens por escopo e lista de escopos falhos. JSONB para o schema não
-    # precisar mudar a cada job novo.
     details: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
     __table_args__ = (Index("ix_ingestion_runs_job_started_at", "job", "started_at"),)

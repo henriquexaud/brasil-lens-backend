@@ -1,16 +1,3 @@
-"""Aplicação FastAPI.
-
-Três pontos não-obvios configurados aqui:
-
-* **GZip**: GeoJSON é texto altamente repetitivo e comprime ~5×. É a única
-  "otimização de infraestrutura" do MVP, e ela age exatamente no gargalo real
-  (bytes na rede), não em CPU.
-* **ORJSONResponse como padrão**: a resposta do mapa é o maior payload do
-  sistema; serialização importa.
-* **Envelope único de erro**: até o 422 de validação do FastAPI é reescrito para
-  `{"error": {...}}`, para o frontend ter um só formato a tratar.
-"""
-
 import asyncio
 import contextlib
 from collections.abc import AsyncIterator
@@ -38,11 +25,8 @@ logger = get_logger(__name__)
 
 
 async def _warm_up() -> None:
-    """Consultas lentas de dado estático, antes do primeiro pedido que as usaria."""
     async with SessionFactory() as session:
         try:
-            # Área geodésica da malha canônica (~2 s): densidade de focos e peso
-            # de cada ponto na média do clima de cada UF no mapa do Brasil.
             await municipality_areas(session)
             await state_areas(session)
         except Exception:
@@ -54,9 +38,6 @@ async def _warm_up() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     logger.info("api.startup", extra={"environment": settings.app_env})
-    # Atualização periódica das fontes climáticas — ver
-    # app/jobs/weather_scheduler.py sobre por que é um laço em processo e não
-    # um cron externo.
     weather_scheduler.start()
     warm_up = asyncio.create_task(_warm_up())
     yield
@@ -86,10 +67,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=False,
-    # Os municípios acompanhados têm operações de escrita feitas pelo browser.
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
-    # Expõe Location para clientes que seguem o recurso criado.
     expose_headers=["Location"],
 )
 

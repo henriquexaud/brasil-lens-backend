@@ -1,15 +1,7 @@
-"""Erros de domínio e o envelope único de erro da API.
-
-Todo erro sai como ``{"error": {"code", "message", "details"}}`` — inclusive os
-422 de validação do FastAPI, para o frontend ter um único formato a tratar.
-"""
-
 from typing import Any
 
 
 class DomainError(Exception):
-    """Base dos erros previsíveis do domínio, cada um com seu status HTTP."""
-
     status_code = 500
     code = "internal_error"
 
@@ -45,8 +37,6 @@ class FollowedMunicipalityNotFoundError(NotFoundError):
 
 
 class ConflictError(DomainError):
-    """Estado atual do recurso impede a escrita (ex.: nome já usado)."""
-
     status_code = 409
     code = "conflict"
 
@@ -60,23 +50,11 @@ class InvalidParameterError(DomainError):
 
 
 class ProviderError(DomainError):
-    """Falha ao consultar ou interpretar uma fonte externa.
-
-    Usado na ingestão e nas consultas de clima sob demanda.
-    """
-
     status_code = 502
     code = "provider_error"
 
 
 class ProviderRateLimitedError(ProviderError):
-    """A fonte recusou a consulta por cota (HTTP 429).
-
-    Diferente de uma queda: insistir não ajuda, só esperar. O tempo de espera
-    vai em `retryAfterSeconds` para o cliente — e o próprio serviço — saberem
-    quando voltar a tentar.
-    """
-
     status_code = 503
     code = "provider_rate_limited"
 

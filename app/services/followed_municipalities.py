@@ -1,11 +1,3 @@
-"""Caso de uso dos municípios seguidos.
-
-Seguir e deixar de seguir são **idempotentes**: o cliente aplica a mudança de
-forma otimista e pode reenviar o mesmo pedido (duplo clique, nova tentativa)
-sem transformar isso em erro. O único erro de escrita é tentar seguir algo que
-não é um município do catálogo.
-"""
-
 from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,7 +37,6 @@ async def list_followed(session: AsyncSession, user_id: str) -> FollowedMunicipa
 async def follow(
     session: AsyncSession, user_id: str, code: str
 ) -> tuple[FollowedMunicipalityOut, bool]:
-    """Segue o município. Devolve o vínculo e se ele acabou de ser criado."""
     level = await territories_repo.get_level_by_code(session, code)
     if level is None:
         raise TerritoryNotFoundError(code)
@@ -57,25 +48,20 @@ async def follow(
 
     created = await followed_repo.follow(session, user_id, code)
     row = await followed_repo.get_for_user(session, user_id, code)
-    assert row is not None  # acabou de ser gravado (ou já existia) nesta transação
+    assert row is not None
     return _to_schema(row), created
 
 
 async def unfollow(session: AsyncSession, user_id: str, code: str) -> None:
-    # Deixar de seguir o que não se segue já é o estado pedido: 204, não 404.
-    # Diferente de apagar uma visualização por id, aqui o recurso é endereçado
-    # pelo município, e o cliente pode repetir o pedido depois de um otimista.
     await followed_repo.unfollow(session, user_id, code)
 
 
 async def set_notifications(
     session: AsyncSession, user_id: str, code: str, enabled: bool
 ) -> FollowedMunicipalityOut:
-    """Liga/desliga as notificações. Diferente de seguir/deixar, aqui 404 é
-    o erro certo: não há vínculo nenhum para carregar a preferência."""
     found = await followed_repo.set_notifications(session, user_id, code, enabled)
     if not found:
         raise FollowedMunicipalityNotFoundError(code)
     row = await followed_repo.get_for_user(session, user_id, code)
-    assert row is not None  # acabou de ser atualizado nesta transação
+    assert row is not None
     return _to_schema(row)

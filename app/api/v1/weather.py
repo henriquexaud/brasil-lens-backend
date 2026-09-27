@@ -1,5 +1,3 @@
-"""Rotas de clima — observações e alertas consultados por recorte geográfico."""
-
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response

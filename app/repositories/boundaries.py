@@ -1,5 +1,3 @@
-"""Áreas territoriais e páginas da malha municipal oficial."""
-
 import json
 from typing import Any
 
@@ -56,7 +54,6 @@ async def municipality_map(
     offset: int = 0,
     limit: int = 24,
 ) -> MapFeatureCollection:
-    # Malha oficial intacta, em páginas pequenas; nunca geometria aproximada.
     version = await data_version(session)
     key = f"canonical-v1:{version}:{parent}:{code}:{bbox}:{offset}:{limit}"
     cached = await redis_cache.read("municipality-map", key, MapFeatureCollection)
@@ -91,7 +88,6 @@ async def municipality_map(
         )
         stmt = stmt.order_by(TerritoryGeometry.geom.op("<->")(center))
     else:
-        # A capital aparece no primeiro lote do estado.
         stmt = stmt.order_by((Territory.id == state.capital_territory_id).desc().nullslast())
     stmt = stmt.order_by(Territory.ibge_code).offset(offset).limit(limit + 1)
     rows = (await session.execute(stmt)).all()

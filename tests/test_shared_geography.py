@@ -1,5 +1,3 @@
-"""Regressões da geografia compartilhada, sem depender de ingestão externa."""
-
 from collections.abc import AsyncIterator
 
 import pytest
@@ -41,7 +39,6 @@ async def geography_api(session: AsyncSession) -> AsyncIterator[AsyncClient]:
             ) WHERE ibge_code = '99'
         """)
         )
-        # Oceano: evita sobreposição caso o banco já tenha as malhas brasileiras.
         for code, west in [("99", -21), ("9900001", -20), ("9900002", -18)]:
             await session.execute(
                 text("""

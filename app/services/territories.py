@@ -1,5 +1,3 @@
-"""Casos de uso de território."""
-
 from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession

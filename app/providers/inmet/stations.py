@@ -1,33 +1,3 @@
-"""Estações meteorológicas automáticas do INMET.
-
-Duas chamadas, contratos verificados de formas diferentes:
-
-1. **`GET /estacoes/T`** — metadado de todas as estações automáticas.
-   **Confirmado por chamada HTTP real** durante o desenho deste provider:
-   devolve uma lista de objetos com `CD_ESTACAO`, `DC_NOME`, `SG_ESTADO`,
-   `VL_LATITUDE`, `VL_LONGITUDE`, `CD_SITUACAO` ("Operante"/"Pane"), entre
-   outros.
-2. **`GET /estacao/{inicio}/{fim}/{codigo}`** — série horária de UMA estação
-   num intervalo de datas. Os nomes de campo (`CD_ESTACAO`, `DT_MEDICAO`,
-   `HR_MEDICAO`, `TEM_INS`, `UMD_INS`, `PRE_INS`, `CHUVA`) vêm confirmados
-   contra o código-fonte do cliente Python `inmetpy`. **O endpoint em si foi
-   confirmado rodando o job de verdade** contra a fonte: a primeira execução
-   real (518 estações) devolveu, para TODAS elas, HTTP 200 com corpo
-   `"Você atingiu o limite de requisições."` em texto plano — a fonte tem
-   *rate limit* agressivo (a chave certa é `/estacao/{inicio}/{fim}/{codigo}`,
-   não outra coisa: só a concorrência é que estava errada). `_get_with_retry`
-   abaixo trata esse texto como sinal de "tente de novo depois", do mesmo
-   jeito que `providers/base.py` já trata HTTP 429 — só que aqui o sinal vem
-   no corpo, não no status, porque é assim que esta fonte específica sinaliza.
-
-Iteração estação-por-estação (não um endpoint "todas as estações hoje") pelo
-mesmo motivo que a importação das malhas consulta municípios UF-por-UF: um
-payload de centenas de estações × dias de uma vez é a forma mais confiável de
-tomar timeout — e o candidato a endpoint em lote (`/estacao/dados/{data}`,
-documentado por clientes de terceiros) devolveu 404 confirmado por chamada
-real, então não é usado aqui.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -46,15 +16,9 @@ SOURCE = "inmet_estacoes"
 PROVIDER_KEY = "inmet"
 
 _OPERATING_STATUS = "Operante"
-# Tolera atraso de publicação da fonte sem pedir um histórico grande a cada
-# ciclo do scheduler.
 _LOOKBACK_DAYS = 2
-# Sentinela de ausência do INMET nos campos numéricos (ex.: -9999).
 _MISSING_THRESHOLD = Decimal("-9990")
 
-# Texto literal com que a fonte sinaliza limite de requisições — confirmado
-# por chamada real (ver docstring do módulo). HTTP 200, não 429: o sinal vem
-# no corpo, então `get_json` (que só reconhece status) não retenta sozinho.
 _RATE_LIMIT_MARKER = "limite de requisições"
 _RATE_LIMIT_MAX_ATTEMPTS = 5
 _RATE_LIMIT_BACKOFF_SECONDS = 4.0
@@ -73,7 +37,6 @@ async def _get_json_with_rate_limit_retry(client: httpx.AsyncClient, path: str) 
 
 
 async def fetch_stations(client: httpx.AsyncClient) -> list[WeatherStationRecord]:
-    """Metadado de todas as estações automáticas em operação."""
     raw = await get_json(client, "/estacoes/T", source=SOURCE)
     if not isinstance(raw, list):
         raise ProviderError(f"{SOURCE} devolveu formato inesperado para /estacoes/T.")
@@ -104,14 +67,6 @@ async def fetch_stations(client: httpx.AsyncClient) -> list[WeatherStationRecord
 async def fetch_latest_observation(
     client: httpx.AsyncClient, station_code: str
 ) -> WeatherObservationRecord | None:
-    """A leitura mais recente de uma estação, dentro da janela de tolerância.
-
-    `None` quando a fonte não publicou nenhuma leitura na janela — não é erro
-    (estações caem, ver `CD_SITUACAO`), é "sem dado agora". **Confirmado por
-    chamada real**: a fonte devolve HTTP 204 (sem corpo) nesse caso — não um
-    array vazio — então isso precisa ser tratado aqui, e não em `get_json`
-    (genérico demais para saber que 204 é normal só *nesta* rota).
-    """
     end = datetime.now(UTC).date()
     start = end - timedelta(days=_LOOKBACK_DAYS)
     path = f"/estacao/{start.isoformat()}/{end.isoformat()}/{station_code}"
@@ -150,7 +105,6 @@ def _to_observation(station_code: str, entry: dict[str, Any]) -> WeatherObservat
 
 
 def _parse_measured_at(raw_date: Any, raw_time: Any) -> datetime | None:
-    """`DT_MEDICAO` ("2026-09-19") + `HR_MEDICAO` ("0000", UTC) → datetime tz-aware."""
     if not raw_date or raw_time is None:
         return None
     try:

@@ -1,5 +1,3 @@
-"""Cliente WFS do BDQueimadas: prévia GeoJSON e páginas CSV completas."""
-
 import asyncio
 import csv
 import io
@@ -30,7 +28,6 @@ def _number(value: object) -> float | None:
         return None
     try:
         number = float(value)  # type: ignore[arg-type]
-        # INPE usa valores negativos para informação ausente em campos meteorológicos.
         return number if math.isfinite(number) and number >= 0 else None
     except (TypeError, ValueError):
         return None
@@ -41,7 +38,7 @@ def parse_feature(raw: dict[str, Any]) -> FireHotspotFeature:
     identifier = f"inpe:{int(props['id_foco_bdq'])}"
     detected = datetime.fromisoformat(props["data_hora_gmt"].replace("Z", "+00:00"))
     if detected.tzinfo is None:
-        detected = detected.replace(tzinfo=UTC)  # O campo INPE é explicitamente GMT.
+        detected = detected.replace(tzinfo=UTC)
     days = _number(props.get("numero_dias_sem_chuva"))
     municipality = props.get("id_2")
     return FireHotspotFeature(
@@ -133,11 +130,9 @@ async def fetch_rows(
         try:
             pages = await asyncio.gather(*tasks)
         finally:
-            # Uma página falhou: as que ainda esperam a vez não vão à fonte.
             for task in tasks:
                 task.cancel()
     rows = [row for page_rows in pages for row in page_rows]
-    # Páginas truncadas ou deslocadas (a fonte mudou no meio) não passam.
     if len(rows) != total or len({row["id_foco_bdq"] for row in rows}) != total:
         raise ValueError("Contagem de focos mudou durante a consulta; tente novamente")
     return rows

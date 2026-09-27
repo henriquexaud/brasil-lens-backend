@@ -1,9 +1,3 @@
-"""Cache compartilhado opcional. Falha de Redis nunca impede consultar a fonte.
-
-Somente dados públicos normalizados são guardados; a geolocalização do navegador
-não passa por este cache. Chaves têm versão, namespace e expiração explícita.
-"""
-
 import hashlib
 import time
 import zlib
@@ -78,7 +72,6 @@ async def read(namespace: str, key: str, model: type[M]) -> M | None:
 
 
 async def read_many(namespace: str, keys: Sequence[str], model: type[M]) -> list[M | None]:
-    """Várias chaves numa ida ao Redis, na ordem pedida; ausentes viram `None`."""
     connection = client()
     if connection is None or not keys:
         return [None] * len(keys)
@@ -102,7 +95,6 @@ async def write(namespace: str, key: str, value: BaseModel, ttl: int) -> None:
 
 
 async def write_many(namespace: str, values: Mapping[str, BaseModel], ttl: int) -> None:
-    """Grava várias chaves num único pipeline, com a mesma expiração."""
     connection = client()
     if connection is None or not values:
         return

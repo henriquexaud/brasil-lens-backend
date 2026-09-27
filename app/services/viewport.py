@@ -1,5 +1,3 @@
-"""Validação compartilhada das consultas espaciais sob demanda."""
-
 import math
 
 from app.core.errors import InvalidParameterError
