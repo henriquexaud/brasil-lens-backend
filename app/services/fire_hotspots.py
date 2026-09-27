@@ -32,7 +32,7 @@ _cache: TTLCache[FireHotspotCollection] = TTLCache(settings.fire_hotspots_cache_
 _fallback: TTLCache[FireHotspotCollection] = TTLCache(3600, 64)
 _failures: TTLCache[bool] = TTLCache(60, 64)
 _locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
-DEFAULT_FIRE_HOURS = 24
+DEFAULT_FIRE_HOURS = 48
 
 
 async def get_fire_hotspots(

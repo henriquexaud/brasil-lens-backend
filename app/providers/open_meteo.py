@@ -102,9 +102,9 @@ async def fetch_locations(
                 "longitude": ",".join(str(city[3]) for city in locations),
                 "current": "temperature_2m,relative_humidity_2m,apparent_temperature,"
                 "precipitation,weather_code,wind_speed_10m",
-                # Chuva por hora nas últimas 24 h: o acumulado que o mapa pinta.
+                # Chuva por hora nas últimas 48 h: o acumulado que o mapa pinta.
                 "hourly": "precipitation",
-                "past_hours": 24,
+                "past_hours": 48,
                 "forecast_hours": 1,
                 # Mesmo sem previsão, o total e a probabilidade de hoje. Até dez
                 # variáveis a coordenada conta como uma única consulta.
@@ -141,7 +141,7 @@ async def fetch_locations(
 RAIN_CODES = frozenset({*range(51, 68), *range(80, 83), 95, 96, 99})
 
 
-def _last_24h(hourly: dict[str, Any], until: int) -> float | None:
+def _last_48h(hourly: dict[str, Any], until: int) -> float | None:
     """Soma a chuva horária até o instante da leitura (as horas futuras ficam fora)."""
     values = [
         value
@@ -177,7 +177,7 @@ def _parse_city(raw: dict[str, Any], capital: tuple[str, str, float, float]) -> 
         precipitation_probability_pct=precip_probs[0] if precip_probs else None,
         precipitation_interval_minutes=current["interval"] // 60,
         weather_code=current.get("weather_code"),
-        precipitation_24h_mm=_last_24h(raw.get("hourly", {}), current["time"]),
+        precipitation_48h_mm=_last_48h(raw.get("hourly", {}), current["time"]),
         raining_now=bool(current.get("precipitation")) or current.get("weather_code") in RAIN_CODES,
         forecast=[
             WeatherForecastDay(

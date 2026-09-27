@@ -29,7 +29,7 @@ _failures: TTLCache[bool] = TTLCache(60, 32)
 _locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 PAGE_SIZE = 10000
 # Páginas pedidas ao mesmo tempo. Na seca o Brasil passa de 40 mil focos em
-# 24 h: em fila, cada página esperava a anterior; poucas por vez não pressionam
+# 48 h: em fila, cada página esperava a anterior; poucas por vez não pressionam
 # o serviço público.
 PAGE_CONCURRENCY = 4
 
@@ -59,7 +59,7 @@ def aggregate(
         counts[code] += 1
         counts[state_code] += 1
         latest[state_code] = max(latest.get(state_code, detected), detected)
-        if detected >= end - timedelta(hours=24):
+        if detected >= end - timedelta(hours=48):
             recent[code] += 1
             recent[state_code] += 1
         latest[code] = max(latest.get(code, detected), detected)
@@ -72,7 +72,7 @@ def aggregate(
             FireMunicipality(
                 **{**area, "area_km2": round(km2, 3) if valid_area else None},
                 count=counts[code],
-                count_24h=recent[code],
+                count_48h=recent[code],
                 density=round(counts[code] * 1000 / km2, 3) if valid_area else None,
                 latest_detection_at=latest.get(code),
             )

@@ -74,9 +74,9 @@ class FireMunicipality(CamelModel):
     state: str
     area_km2: float | None
     count: int
-    count_24h: int = Field(
-        validation_alias=AliasChoices("count_24h", "count24h", "count24H"),
-        serialization_alias="count24h",
+    count_48h: int = Field(
+        validation_alias=AliasChoices("count_48h", "count48h", "count48H"),
+        serialization_alias="count48h",
     )
     density: float | None
     latest_detection_at: datetime | None

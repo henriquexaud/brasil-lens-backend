@@ -153,9 +153,9 @@ class WeatherCity(CamelModel):
     precipitation_probability_pct: FiniteFloat | None = None
     precipitation_interval_minutes: int
     weather_code: int | None
-    # Acumulado das últimas 24 h, o que o mapa de chuva pinta; `precipitation_mm`
+    # Acumulado das últimas 48 h, o que o mapa de chuva pinta; `precipitation_mm`
     # é só o intervalo mais recente e `precipitation_sum_mm`, o total de hoje.
-    precipitation_24h_mm: FiniteFloat | None = Field(default=None, alias="precipitation24hMm")
+    precipitation_48h_mm: FiniteFloat | None = Field(default=None, alias="precipitation48hMm")
     # Chovendo no intervalo mais recente (precipitação ou código de chuva).
     raining_now: bool = False
     # Visão do Brasil: quantos pontos medidos compõem a média da UF e quantos
@@ -206,7 +206,7 @@ def build_weather_summary(cities: list[WeatherCity]) -> WeatherSummary:
         val = next(
             (
                 v
-                for v in (c.precipitation_24h_mm, c.precipitation_sum_mm, c.precipitation_mm)
+                for v in (c.precipitation_48h_mm, c.precipitation_sum_mm, c.precipitation_mm)
                 if v is not None
             ),
             None,

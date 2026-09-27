@@ -71,7 +71,7 @@ MAX_DATA_AGE = timedelta(hours=2)
 MAX_FALLBACK_AGE = timedelta(hours=12)
 FUTURE_TOLERANCE = timedelta(minutes=15)
 READING_TTL_SECONDS = int(MAX_FALLBACK_AGE.total_seconds())
-READINGS_NAMESPACE = "weather-reading"
+READINGS_NAMESPACE = "weather-reading-v2"
 # Municípios medidos de fato por estado; os demais são interpolados (IDW).
 STATE_SAMPLE_SIZE = 20
 # Mapa do Brasil: cada UF é medida em pontos espalhados pelo território, um a
@@ -507,7 +507,7 @@ def _state_average(
             "humidity_pct": mean("humidity_pct"),
             "wind_speed_kmh": mean("wind_speed_kmh"),
             "weather_code": max(sky, key=sky.__getitem__) if sky else None,
-            "precipitation_24h_mm": mean("precipitation_24h_mm"),
+            "precipitation_48h_mm": mean("precipitation_48h_mm"),
             "precipitation_sum_mm": mean("precipitation_sum_mm"),
             "precipitation_mm": max((city.precipitation_mm or 0) for city in cities),
             "precipitation_probability_pct": max(chances) if chances else None,
