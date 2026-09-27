@@ -14,7 +14,7 @@ Prefixo: `/api/v1`. O Swagger em `/docs` é gerado a partir das rotas e schemas 
 | GET | `/weather/*` | Condições, previsão, estações, alertas e geometrias municipais |
 | GET | `/fire-hotspots`, `/fire-hotspots/summary`, `/fire-hotspots/identify` | Focos do INPE e resumos por recorte |
 | GET | `/hydrography` | Rios e corpos d'água |
-| GET, PUT, DELETE, POST | `/me/followed-municipalities` | Lista, segue, deixa de seguir e configura avisos de municípios |
+| GET, PUT, DELETE, POST | `/me/followed-municipalities` | Lista, segue, deixa de seguir e salva preferência de avisos (sem envio de notificações) |
 
 ## Mapa
 

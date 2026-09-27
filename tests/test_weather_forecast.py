@@ -731,7 +731,9 @@ async def test_new_ingestion_rebuilds_national_weights_and_grid(monkeypatch) -> 
     monkeypatch.setattr(service, "data_version", version)
     first = await service._national_sample(AsyncMock())
     service._representatives[("35", 1)] = {(0, 0): "old-point"}
-    service._state_responses.set("35", WeatherCurrentResponse(fetched_at=datetime.now(UTC), cities=[]))
+    service._state_responses.set(
+        "35", WeatherCurrentResponse(fetched_at=datetime.now(UTC), cities=[])
+    )
     new_areas = [{"ibge_code": row[0], "area_km2": row[4] * 2} for row in SP_STATE]
     monkeypatch.setattr(service, "municipality_areas", AsyncMock(return_value=new_areas))
 

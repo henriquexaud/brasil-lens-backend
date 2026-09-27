@@ -17,7 +17,7 @@ Opções:
 
 ## Atualização climática
 
-O scheduler da API atualiza observações do INMET, alertas do INMET e CEMADEN. Condições e previsão da Open-Meteo e focos do INPE são consultados conforme a camada e o recorte solicitados. A hidrografia é servida a partir da camada geográfica consultada ao SNIRH/ANA e pode ser aquecida no startup.
+O scheduler da API atualiza somente alertas do INMET e CEMADEN. A ingestão legada de estações do INMET é manual, via `python -m app.jobs.import_weather_inmet_stations`; ela não integra a atualização periódica. Condições e previsão da Open-Meteo e focos do INPE são consultados conforme a camada e o recorte solicitados. A hidrografia é servida a partir da camada geográfica consultada ao SNIRH/ANA e pode ser aquecida no startup.
 
 ## Integridade
 

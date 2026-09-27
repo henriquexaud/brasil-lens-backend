@@ -2,6 +2,20 @@
 
 A API é um monólito modular: `providers` convertem fontes externas em registros internos; `jobs` ingerem dados; `repositories` consultam PostgreSQL/PostGIS; `services` aplicam regras; `api/v1` expõe os contratos HTTP.
 
+## Componentes e comunicação
+
+```mermaid
+flowchart LR
+    Web["React / Leaflet — interface principal"] -->|"REST: GET, POST, PUT, DELETE"| API["FastAPI — API própria"]
+    API -->|"SQL / consultas espaciais"| DB["PostgreSQL / PostGIS"]
+    API --> Cache["Redis opcional"]
+    API -->|"REST / JSON / GeoJSON"| Fontes["IBGE, Open-Meteo, INMET, CEMADEN, INPE, ANA"]
+```
+
+Frontend e backend têm [repositórios](https://github.com/henriquexaud/brasil-lens-frontend) [públicos separados](https://github.com/henriquexaud/brasil-lens-backend), Dockerfiles e READMEs próprios. As APIs externas formam o terceiro componente: seus dados são processados e integrados ao domínio, sem credenciais pagas. O Compose completo fica no backend; um Compose adicional na pasta de trabalho permite desenvolver clones locais juntos.
+
+A interface usa GET para consultas, POST para localização por coordenadas e preferências de avisos, PUT para acompanhar municípios e DELETE para removê-los. A API oferece mais de quatro operações e persiste o acompanhamento no PostgreSQL. Mapas ambientais, interpolação, alertas e densidade espacial constituem as funcionalidades além do CRUD.
+
 ## Domínio territorial
 
 `territories` mantém país, regiões, estados e municípios numa hierarquia única, relacionada por `parent_id`. `ibge_code` preserva os códigos oficiais. As colunas `bbox_*` aceleram o enquadramento do mapa e os índices normalizados apoiam busca sem acentos.
@@ -25,9 +39,9 @@ A projeção do mapa retorna diretamente as linhas geográficas, sem um objeto i
 
 ## Cache e atualização
 
-A malha usa cache local e Redis, com chave versionada pela última importação territorial/geográfica e ETag HTTP. A versão `v4` invalida o contrato antigo; no primeiro startup, o backend remove as chaves Redis da versão anterior. Dados meteorológicos têm TTLs próprios. Redis indisponível não impede a consulta ao banco ou às fontes.
+A malha usa cache local e Redis, com chave versionada pela última importação territorial/geográfica e ETag HTTP. A consulta da versão de ingestão é compartilhada por até 60 segundos; quando uma nova versão é observada, os derivados geográficos passam a usar novas chaves. O namespace `v4` isola o contrato atual; chaves de versões anteriores expiram por TTL, sem varredura no startup. Dados meteorológicos têm TTLs próprios. Redis indisponível não impede a consulta ao banco ou às fontes.
 
-O agendador atualiza as fontes ambientais no processo da API. A hidrografia pode ser aquecida em segundo plano para evitar o custo da primeira consulta.
+O agendador atualiza alertas do INMET e CEMADEN no processo da API; condições e previsões da Open-Meteo são consultadas sob demanda. A ingestão legada de estações do INMET permanece disponível pela CLI e não roda no agendador. A hidrografia pode ser aquecida em segundo plano para evitar o custo da primeira consulta.
 
 ## Persistência
 

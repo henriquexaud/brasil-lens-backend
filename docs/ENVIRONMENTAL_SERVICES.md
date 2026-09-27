@@ -10,7 +10,7 @@ O Brasil Lens integra geografia territorial do IBGE com dados ambientais sobre c
 |---|---|---|---|
 | **Open-Meteo** | Condições atuais e previsão de 3 dias (temperatura, chuva, vento, umidade) | API REST JSON aberta | Cache em Redis (15–30 min), fallback local |
 | **INMET** | Avisos de eventos meteorológicos severos (chuva forte, onda de calor, vendaval) | API REST JSON | Ingestão periódica com categorização normalizada |
-| **CEMADEN** | Alertas de riscos geo-hidrológicos (alagamentos, enxurradas, deslizamentos) | GeoServer OGC WFS (`alertas_vigentes_siaden`) | Validade estendida por buffer de 4h |
+| **CEMADEN** | Alertas de riscos geo-hidrológicos (alagamentos, enxurradas, deslizamentos) | GeoServer OGC WFS (`alertas_vigentes_siaden`) | Validade estendida por buffer configurável (30 min por padrão) |
 | **INPE (BDQueimadas)** | Detecções de focos de calor e potência radiativa de fogo (FRP) | GeoServer OGC WFS / WMS (`bdqueimadas:focos`) | WMS em zoom próximo, agregação e densidade por 1.000 km² em zoom amplo |
 | **ANA** | Malha de hidrografia (rios e corpos d'água) | API REST GeoJSON | Simplificação conforme nível de zoom |
 
@@ -41,6 +41,8 @@ Os focos de queimadas são obtidos diretamente dos serviços públicos do Instit
 Integra duas fontes oficiais complementares:
 1. **INMET:** Foco no fenômeno meteorológico de origem.
 2. **CEMADEN:** Foco no risco geo-hidrológico de impacto (deslizamento, enxurrada).
+
+O agendador importa os alertas dessas duas fontes a cada 10 minutos por padrão. A ingestão de estações do INMET permanece como job manual; condições atuais e previsão usam a Open-Meteo.
 
 O backend normaliza ambas as fontes para um modelo comum de severidade (`potential`, `danger`, `extreme`), permitindo que a interface web apresente os riscos de forma clara e prioritária.
 

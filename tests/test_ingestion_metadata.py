@@ -20,7 +20,9 @@ async def test_dataset_upsert_refreshes_source_date_without_erasing_it_when_omit
     identifier = await upsert_dataset(session, **args, source_updated_at=first_date)
     assert await upsert_dataset(session, **args, source_updated_at=second_date) == identifier
     await upsert_dataset(session, **args)
-    updated = await session.scalar(select(Dataset.source_updated_at).where(Dataset.id == identifier))
+    updated = await session.scalar(
+        select(Dataset.source_updated_at).where(Dataset.id == identifier)
+    )
     assert updated == second_date
 
 
@@ -34,9 +36,7 @@ async def test_running_refresh_preserves_last_completed_source_status(session):
         started_at=now - timedelta(minutes=2),
         finished_at=now - timedelta(minutes=1),
     )
-    running = IngestionRun(
-        job=job, source="test", status=IngestionStatus.RUNNING, started_at=now
-    )
+    running = IngestionRun(job=job, source="test", status=IngestionStatus.RUNNING, started_at=now)
     session.add_all([completed, running])
     await session.flush()
 

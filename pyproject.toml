@@ -21,8 +21,12 @@ dependencies = [
 requires = ["setuptools>=75"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-packages = ["app"]
+[tool.setuptools.packages.find]
+include = ["app", "app.*"]
+namespaces = false
+
+[tool.setuptools.package-data]
+"app.services" = ["data/*.json"]
 
 [project.optional-dependencies]
 dev = [

@@ -4,7 +4,7 @@ O backend serve dados geográficos e ambientais ao mapa do Brasil Lens. A estrut
 
 ## Desenvolvimento local
 
-Python 3.12, PostgreSQL com PostGIS e Redis são necessários para executar a stack. Com Docker Compose:
+Docker e Docker Compose v2 executam toda a stack sem dependências Python no host. Para executar a API diretamente, use Python 3.12 (versão usada e validada no Docker) e PostgreSQL/PostGIS; Redis é opcional. A instalação e configuração estão no [README](../README.md). Com Docker Compose:
 
 ```bash
 make up-api
@@ -12,6 +12,8 @@ make ingest
 make test
 make lint
 ```
+
+O Dockerfile separa os targets `production` e `development`; `make test`, `make lint` e `make dev` selecionam o segundo automaticamente. Os testes rodam com o código local montado, não com uma cópia antiga dos fontes.
 
 `make ingest` importa territórios e geometrias do IBGE para suportar o mapa, busca e recortes espaciais. As credenciais e endereços de fontes ambientais são configurados pelas variáveis descritas no README.
 

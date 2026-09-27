@@ -13,7 +13,9 @@ from app.jobs._runner import RunReport
 
 
 @pytest.mark.parametrize("failed_step", ["import_territories", "import_geometries", None])
-async def test_bootstrap_propagates_failure_and_restores_arguments(monkeypatch, capsys, failed_step):
+async def test_bootstrap_propagates_failure_and_restores_arguments(
+    monkeypatch, capsys, failed_step
+):
     original = ["bootstrap", "--states", "35", "--skip-municipal-geometries"]
     monkeypatch.setattr(sys, "argv", original)
     territories = AsyncMock(return_value=int(failed_step == "import_territories"))
