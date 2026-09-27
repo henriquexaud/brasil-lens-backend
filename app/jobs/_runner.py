@@ -125,8 +125,11 @@ async def upsert_dataset(
     """Garante o dataset e devolve seu id.
 
     Idempotente via UNIQUE (source, code): reexecutar atualiza nome/URL em vez
-    de criar uma linha nova.
+    de criar uma linha nova. A data da fonte só muda quando informada.
     """
+    updates: dict[str, Any] = {"name": name, "url": url, "updated_at": datetime.now(UTC)}
+    if source_updated_at is not None:
+        updates["source_updated_at"] = source_updated_at
     statement = (
         insert(Dataset)
         .values(
@@ -138,7 +141,7 @@ async def upsert_dataset(
         )
         .on_conflict_do_update(
             constraint="uq_datasets_source_code",
-            set_={"name": name, "url": url, "updated_at": datetime.now(UTC)},
+            set_=updates,
         )
         .returning(Dataset.id)
     )

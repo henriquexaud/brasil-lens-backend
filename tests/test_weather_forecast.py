@@ -43,8 +43,10 @@ def city() -> WeatherCity:
 
 
 @pytest.fixture(autouse=True)
-def clean_cache() -> Iterator[None]:
+def clean_cache(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> Iterator[None]:
     service.reset_state()
+    if request.node.get_closest_marker("db") is None:
+        monkeypatch.setattr(service, "data_version", AsyncMock(return_value=0))
     yield
     # Pausas e leituras são do processo: sem limpar ao sair, vazariam para os
     # testes de outros arquivos.
@@ -238,11 +240,11 @@ async def test_current_only_does_not_request_daily_forecast() -> None:
     del raw["daily"]
 
     def respond(request: httpx.Request) -> httpx.Response:
-        # Sem previsão, só o total e a probabilidade de hoje — e a chuva horária de 24 h.
+        # Sem previsão, só o total e a probabilidade de hoje — e a chuva horária de 48 h.
         assert request.url.params["daily"] == "precipitation_probability_max,precipitation_sum"
         assert request.url.params["forecast_days"] == "1"
         assert request.url.params["hourly"] == "precipitation"
-        assert request.url.params["past_hours"] == "24"
+        assert request.url.params["past_hours"] == "48"
         return httpx.Response(200, json=raw)
 
     async with httpx.AsyncClient(
@@ -595,18 +597,18 @@ async def test_state_sample_is_reused_by_the_close_view(
 # ----------------------------------------------------------------- chuva --
 
 
-def test_rain_is_the_last_24_hours_and_live_rain_comes_from_the_latest_interval() -> None:
+def test_rain_is_the_last_48_hours_and_live_rain_comes_from_the_latest_interval() -> None:
     now = int(datetime.now(UTC).timestamp())
     raw = payload()
     raw["current"]["time"] = now
     raw["current"]["precipitation"] = 0
     raw["current"]["weather_code"] = 61
     raw["hourly"] = {
-        "time": [now - 7200, now - 3600, now, now + 3600],
-        "precipitation": [1.2, None, 0.4, 9.0],  # a hora futura não entra
+        "time": [now - 49 * 3600, now - 48 * 3600, now - 47 * 3600, now - 3600, now, now + 3600],
+        "precipitation": [8.0, 7.0, 1.2, None, 0.4, 9.0],
     }
     city = open_meteo._parse_city(raw, open_meteo.CAPITALS[0])
-    assert city.precipitation_24h_mm == 1.6
+    assert city.precipitation_48h_mm == 1.6
     assert city.raining_now, "código de chuva, mesmo com o intervalo zerado"
     raw["current"]["weather_code"] = 3
     assert not open_meteo._parse_city(raw, open_meteo.CAPITALS[0]).raining_now
@@ -614,9 +616,22 @@ def test_rain_is_the_last_24_hours_and_live_rain_comes_from_the_latest_interval(
     assert open_meteo._parse_city(raw, open_meteo.CAPITALS[0]).raining_now
 
 
+@pytest.mark.parametrize("minute", [0, 15, 45])
+def test_rain_accumulation_has_48_hourly_values_and_preserves_missing_data(minute: int) -> None:
+    hour = int(datetime(2026, 9, 27, 12, tzinfo=UTC).timestamp())
+    until = hour + minute * 60
+    hourly = {
+        "time": [hour + offset * 3600 for offset in range(-50, 2)],
+        "precipitation": [1.0] * 52,
+    }
+    assert open_meteo._last_48h(hourly, until) == 48.0
+    assert open_meteo._last_48h({"time": [until], "precipitation": [0.0]}, until) == 0.0
+    assert open_meteo._last_48h({"time": [until], "precipitation": [None]}, until) is None
+
+
 # ------------------------------------------------------- mapa do Brasil --
 
-# Código, nome, latitude, longitude, área (km²), temperatura, céu, chuva em 24 h, chovendo.
+# Código, nome, latitude, longitude, área (km²), temperatura, céu, chuva em 48 h, chovendo.
 SP_STATE = [
     (SAO_PAULO[0], "São Paulo", -23.5, -46.6, 1_500, 18.0, 3, 0.0, False),
     ("3541406", "Presidente Prudente", -22.1, -51.4, 100_000, 30.0, 0, 0.0, False),
@@ -638,7 +653,7 @@ def mock_sao_paulo_state(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     monkeypatch.setattr(territories, "list_weather_points", AsyncMock(return_value=points))
     areas = [{"ibge_code": row[0], "area_km2": row[4]} for row in SP_STATE]
     monkeypatch.setattr(service, "municipality_areas", AsyncMock(return_value=areas))
-    fields = ("temperature_c", "weather_code", "precipitation_24h_mm", "raining_now")
+    fields = ("temperature_c", "weather_code", "precipitation_48h_mm", "raining_now")
     values = {row[1]: dict(zip(fields, row[5:], strict=True)) for row in SP_STATE}
 
     async def fetch(client, locations, *, include_forecast):
@@ -668,7 +683,7 @@ async def test_brazil_state_is_the_area_weighted_average_of_dispersed_points(
     assert requested(fetch)[1:] == ["Presidente Prudente", "Ribeirão Preto", "Santos"]
     # A capital representa também Campinas e Sorocaba (88 mil km²); Santos, só a sua área.
     assert sp.temperature_c == 25.2, "só a capital: 18 °C; média simples: 24 °C"
-    assert sp.precipitation_24h_mm == 1.0, "a chuva de Santos não cobre o estado (média simples: 4)"
+    assert sp.precipitation_48h_mm == 1.0, "a chuva de Santos não cobre o estado (média simples: 4)"
     assert sp.weather_code == 0, "o céu que cobre a maior área"
     assert sp.raining_now and (sp.sample_points, sp.raining_points) == (4, 1)
     assert (sp.latitude, sp.longitude) == SAO_PAULO[3:], "a pílula continua na capital"
@@ -705,6 +720,25 @@ async def test_brazil_map_measures_every_state_reusing_the_capitals(
 
 
 def test_rain_fields_keep_the_frontend_names() -> None:
-    body = city().model_copy(update={"precipitation_24h_mm": 3.2}).model_dump(by_alias=True)
-    assert body["precipitation24hMm"] == 3.2
+    body = city().model_copy(update={"precipitation_48h_mm": 3.2}).model_dump(by_alias=True)
+    assert body["precipitation48hMm"] == 3.2
     assert {"rainingNow", "rainingPoints", "samplePoints"} <= body.keys()
+
+
+async def test_new_ingestion_rebuilds_national_weights_and_grid(monkeypatch) -> None:
+    mock_sao_paulo_state(monkeypatch)
+    version = AsyncMock(return_value=1)
+    monkeypatch.setattr(service, "data_version", version)
+    first = await service._national_sample(AsyncMock())
+    service._representatives[("35", 1)] = {(0, 0): "old-point"}
+    service._state_responses.set("35", WeatherCurrentResponse(fetched_at=datetime.now(UTC), cities=[]))
+    new_areas = [{"ibge_code": row[0], "area_km2": row[4] * 2} for row in SP_STATE]
+    monkeypatch.setattr(service, "municipality_areas", AsyncMock(return_value=new_areas))
+
+    assert await service._national_sample(AsyncMock()) == first
+    version.return_value = 2
+    second = await service._national_sample(AsyncMock())
+
+    assert sum(second[0].weights) == 2 * sum(first[0].weights)
+    assert service._representatives == {}
+    assert service._state_responses.get("35") is None

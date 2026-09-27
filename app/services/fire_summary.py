@@ -20,6 +20,7 @@ from app.core.errors import InvalidParameterError, ProviderError
 from app.providers.inpe import fetch_features as _fetch_wfs
 from app.providers.inpe import fetch_rows
 from app.repositories.boundaries import municipality_areas, state_areas
+from app.repositories.map_projection import data_version
 from app.schemas.fire_hotspots import FireMunicipality, FireScope, FireSummary
 from app.services.fire_scope import scope_filter as _scope_filter
 from app.services.fire_scope import time_filter as _time_filter
@@ -105,7 +106,8 @@ async def get_summary(
     # O filtro WFS trunca para segundos; sem isto a validação de `aggregate` diverge da fonte.
     at = at.replace(microsecond=0)
     scope = await _scope_filter(session, level, parent)
-    key = f"{scope}:{hours}:{at.isoformat()}"
+    version = await data_version(session)
+    key = f"{scope}:{hours}:{at.isoformat()}:{version}"
     lock = _locks.setdefault(key, asyncio.Lock())
     async with lock:
         cached = _cache.get(key)

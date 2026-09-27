@@ -28,7 +28,6 @@ from app.core.config import settings
 from app.core.errors import DomainError, error_body
 from app.core.logging import configure_logging, get_logger
 from app.core.redis_cache import close as close_redis
-from app.core.redis_cache import purge_previous_cache_version
 from app.db.session import SessionFactory, dispose_engine
 from app.jobs import weather_scheduler
 from app.repositories.boundaries import municipality_areas, state_areas
@@ -55,7 +54,6 @@ async def _warm_up() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     logger.info("api.startup", extra={"environment": settings.app_env})
-    await purge_previous_cache_version()
     # Atualização periódica das fontes climáticas — ver
     # app/jobs/weather_scheduler.py sobre por que é um laço em processo e não
     # um cron externo.

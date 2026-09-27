@@ -113,15 +113,15 @@ def test_interpolated_city_keeps_timezone_and_time_of_closest_measurement():
     assert result.observed_at == observed
 
 
-def test_interpolate_rain_of_the_last_24h_and_live_rain_from_the_nearest():
+def test_interpolate_rain_of_the_last_48h_and_live_rain_from_the_nearest():
     wet = make_city("A", "Cidade A", -23.0, -46.0, 20.0).model_copy(
-        update={"precipitation_24h_mm": 20.0, "raining_now": True}
+        update={"precipitation_48h_mm": 20.0, "raining_now": True}
     )
     dry = make_city("B", "Cidade B", -23.0, -47.0, 20.0).model_copy(
-        update={"precipitation_24h_mm": 0.0, "raining_now": False}
+        update={"precipitation_48h_mm": 0.0, "raining_now": False}
     )
     near_wet = interpolate_municipal_weather("X", "X", -23.0, -46.25, [wet, dry], "SP")
-    assert 0 < near_wet.precipitation_24h_mm < 20.0
+    assert 0 < near_wet.precipitation_48h_mm < 20.0
     assert near_wet.raining_now
     near_dry = interpolate_municipal_weather("Y", "Y", -23.0, -46.75, [wet, dry], "SP")
     assert not near_dry.raining_now

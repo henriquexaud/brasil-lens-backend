@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
@@ -115,6 +116,7 @@ async def test_fire_summary_window_ignores_sub_second_part_of_at(
         return [{"ibge_code": "1100001", "name": "Teste", "state": "RO", "area_km2": 10.0}]
 
     monkeypatch.setattr(summary_service, "_scope_filter", scope)
+    monkeypatch.setattr(summary_service, "data_version", AsyncMock(return_value=0))
     monkeypatch.setattr(summary_service, "_fetch_wfs", wfs)
     monkeypatch.setattr(summary_service, "_fetch_rows", rows)
     monkeypatch.setattr(summary_service, "municipality_areas", areas)

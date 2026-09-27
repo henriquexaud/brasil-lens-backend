@@ -380,7 +380,7 @@ async def main() -> int:
         print("  Causa usual: município criado após a última publicação da malha.")
     if report.failures:
         print(f"  ATENÇÃO: {len(report.failures)} escopo(s) falharam (ver ingestion_runs.details).")
-    return 0
+    return 1 if report.failures else 0
 
 
 async def _fetch_level(

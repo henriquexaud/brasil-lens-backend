@@ -11,13 +11,15 @@ from sqlalchemy.orm import aliased
 from app.core import redis_cache
 from app.core.cache import TTLCache
 from app.models import GeometryLOD, Territory, TerritoryGeometry, TerritoryLevel
+from app.repositories.map_projection import data_version
 from app.schemas.map import MapFeature, MapFeatureCollection, MapFeatureProperties, MapScope
 
 _areas: TTLCache[list[dict[str, Any]]] = TTLCache(86400, 2)
 
 
 async def municipality_areas(session: AsyncSession) -> list[dict[str, Any]]:
-    cached = _areas.get("municipalities")
+    key = ("municipalities", await data_version(session))
+    cached = _areas.get(key)
     if cached is not None:
         return cached
     state = aliased(Territory)
@@ -40,7 +42,8 @@ async def municipality_areas(session: AsyncSession) -> list[dict[str, Any]]:
         dict(ibge_code=code, name=name, state=uf, area_km2=float(area) if area else None)
         for code, name, uf, area in (await session.execute(stmt)).all()
     ]
-    _areas.set("municipalities", result)
+    if result:
+        _areas.set(key, result)
     return result
 
 
@@ -54,7 +57,8 @@ async def municipality_map(
     limit: int = 24,
 ) -> MapFeatureCollection:
     # Malha oficial intacta, em páginas pequenas; nunca geometria aproximada.
-    key = f"canonical-v1:{parent}:{code}:{bbox}:{offset}:{limit}"
+    version = await data_version(session)
+    key = f"canonical-v1:{version}:{parent}:{code}:{bbox}:{offset}:{limit}"
     cached = await redis_cache.read("municipality-map", key, MapFeatureCollection)
     if cached is not None:
         return cached
@@ -115,12 +119,14 @@ async def municipality_map(
         features=features,
         next_offset=offset + limit if len(rows) > limit else None,
     )
-    await redis_cache.write("municipality-map", key, result, 86400)
+    if result.features:
+        await redis_cache.write("municipality-map", key, result, 86400)
     return result
 
 
 async def state_areas(session: AsyncSession) -> list[dict[str, Any]]:
-    cached = _areas.get("states")
+    key = ("states", await data_version(session))
+    cached = _areas.get(key)
     if cached is not None:
         return cached
     stmt = (
@@ -141,5 +147,6 @@ async def state_areas(session: AsyncSession) -> list[dict[str, Any]]:
         dict(ibge_code=code, name=name, state=uf, area_km2=float(area) if area else None)
         for code, name, uf, area in (await session.execute(stmt)).all()
     ]
-    _areas.set("states", result)
+    if result:
+        _areas.set(key, result)
     return result

@@ -24,6 +24,7 @@ POINTS = [
 @pytest.fixture(autouse=True)
 def synthetic_state(monkeypatch: pytest.MonkeyPatch) -> Iterator[AsyncMock]:
     service.reset_state()
+    monkeypatch.setattr(service, "data_version", AsyncMock(return_value=0))
     monkeypatch.setattr(service, "STATE_SAMPLE_SIZE", 1)
     monkeypatch.setattr(territories, "list_weather_points", AsyncMock(return_value=POINTS))
     visible = AsyncMock(return_value=[(c, n, "SP", lat, lon) for c, n, lat, lon in POINTS])

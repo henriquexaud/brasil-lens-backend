@@ -42,7 +42,6 @@ _cache: TTLCache[MapFeatureCollection] = TTLCache(
     ttl_seconds=settings.read_cache_ttl_seconds,
     max_entries=settings.read_cache_max_entries,
 )
-_version_cache: TTLCache[int] = TTLCache(ttl_seconds=60, max_entries=1)
 
 
 def cache_stats() -> dict[str, int]:
@@ -51,17 +50,12 @@ def cache_stats() -> dict[str, int]:
 
 def clear_cache() -> None:
     _cache.clear()
-    _version_cache.clear()
+    map_repo.clear_version_cache()
 
 
 async def data_version(session: AsyncSession) -> int:
     """Versão dos dados do mapa: muda a cada ingestão de territórios ou malhas."""
-    cached = _version_cache.get("version")
-    if cached is not None:
-        return cached
-    version = await map_repo.fetch_data_version(session)
-    _version_cache.set("version", version)
-    return version
+    return await map_repo.data_version(session)
 
 
 def projection_key(

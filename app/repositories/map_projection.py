@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.cache import TTLCache
 from app.models import GeometryLOD, TerritoryLevel
 
 
@@ -135,6 +136,7 @@ async def fetch_single_feature(
 
 # Jobs cuja execução altera a malha territorial ou de geometrias servida no mapa.
 _MAP_JOBS = ("import_territories", "import_geometries")
+_version_cache: TTLCache[int] = TTLCache(ttl_seconds=60, max_entries=1)
 
 _DATA_VERSION_SQL = text(
     """
@@ -150,3 +152,17 @@ async def fetch_data_version(session: AsyncSession) -> int:
     """Instante (epoch) da última ingestão que alterou territórios ou malhas."""
     result = await session.execute(_DATA_VERSION_SQL, {"jobs": list(_MAP_JOBS)})
     return int(result.scalar_one())
+
+
+async def data_version(session: AsyncSession) -> int:
+    """Versão compartilhada pela malha e seus derivados; uma consulta por minuto."""
+    cached = _version_cache.get("version")
+    if cached is not None:
+        return cached
+    version = await fetch_data_version(session)
+    _version_cache.set("version", version)
+    return version
+
+
+def clear_version_cache() -> None:
+    _version_cache.clear()

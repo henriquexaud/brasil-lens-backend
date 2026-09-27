@@ -192,7 +192,7 @@ async def main() -> int:
     print(f"  capitais vinculadas: {report.details.get('capitals_linked', 0)}")
     if report.failures:
         print(f"  ATENÇÃO: {len(report.failures)} escopo(s) falharam.")
-    return 0
+    return 1 if report.failures else 0
 
 
 if __name__ == "__main__":

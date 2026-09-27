@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_session
+from app.core.config import settings
 from app.core.errors import InvalidParameterError
 from app.repositories.boundaries import municipality_map
 from app.schemas.map import MapFeatureCollection
@@ -136,7 +137,7 @@ async def viewport_boundaries(
 ) -> MapFeatureCollection:
     if not (bbox or parent or code):
         raise InvalidParameterError("Informe um estado, município ou área visível.", "bbox")
-    response.headers["Cache-Control"] = "public, max-age=86400"
+    response.headers["Cache-Control"] = f"public, max-age={settings.http_cache_max_age}"
     return await municipality_map(
         session,
         parse_bbox(bbox, max_span=80) if bbox else None,

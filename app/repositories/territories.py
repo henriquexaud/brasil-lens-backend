@@ -14,8 +14,10 @@ from sqlalchemy import ColumnElement, Select, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.core.cache import TTLCache
 from app.core.text import normalize_text
 from app.models import GeometryLOD, Territory, TerritoryGeometry, TerritoryLevel
+from app.repositories.map_projection import data_version
 
 
 @dataclass(frozen=True, slots=True)
@@ -234,7 +236,7 @@ async def children_summary(
     return total, TerritoryLevel(record.child_level)
 
 
-_DISPERSED_POINTS_CACHE: dict[str, list[tuple[str, str, float, float]]] = {}
+_DISPERSED_POINTS_CACHE: TTLCache[list[tuple[str, str, float, float]]] = TTLCache(86400, 27)
 
 
 def _farthest_point_sampling(
@@ -294,8 +296,8 @@ async def list_weather_points(
     offset: int,
     limit: int,
 ) -> list[tuple[str, str, float, float]]:
-    if parent_code in _DISPERSED_POINTS_CACHE:
-        all_points = _DISPERSED_POINTS_CACHE[parent_code]
+    key = (await data_version(session), parent_code)
+    if (all_points := _DISPERSED_POINTS_CACHE.get(key)) is not None:
         return all_points[offset : offset + limit]
 
     parent = aliased(Territory)
@@ -332,5 +334,5 @@ async def list_weather_points(
                 break
 
     ordered_points = _farthest_point_sampling(points, start_idx)
-    _DISPERSED_POINTS_CACHE[parent_code] = ordered_points
+    _DISPERSED_POINTS_CACHE.set(key, ordered_points)
     return ordered_points[offset : offset + limit]

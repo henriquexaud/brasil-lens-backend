@@ -39,9 +39,12 @@ async def main() -> int:
         logger.info("bootstrap.step", extra={"step": name})
         sys.argv = [name, *extra_args]
         try:
-            await module.main()
+            exit_code = await module.main()
         finally:
             sys.argv = original_argv
+        if exit_code:
+            print(f"\nIngestão interrompida: {name} terminou com falhas. Reexecute para completar.")
+            return exit_code
 
     print("\nIngestão territorial completa.")
     return 0

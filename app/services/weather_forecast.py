@@ -46,6 +46,7 @@ from app.providers.open_meteo import CAPITALS, fetch_locations
 from app.repositories import territories
 from app.repositories import viewport as viewport_repo
 from app.repositories.boundaries import municipality_areas
+from app.repositories.map_projection import data_version
 from app.schemas.weather import (
     WeatherCity,
     WeatherCurrentResponse,
@@ -140,6 +141,7 @@ _inflight: dict[tuple[Variant, str], asyncio.Task[dict[str, WeatherReading]]] = 
 _representatives: dict[tuple[str, float], dict[tuple[int, int], str]] = {}
 # Amostra e pesos de cada UF no mapa do Brasil, por sigla: dependem só da malha.
 _national_samples: dict[str, _NationalSample] = {}
+_geography_version: int | None = None
 # Falha da fonte pausa as consultas por um minuto; ver app/core/cooldown.py.
 open_meteo_cooldown = SourceCooldown("open_meteo", 60)
 # Cota da fonte esgotada (HTTP 429): enquanto vale, nenhuma consulta sai. É
@@ -428,7 +430,8 @@ def _area_weights(points: list[Point], sample: list[Point], area: dict[str, floa
 
 
 async def _national_sample(session: AsyncSession) -> list[_NationalSample]:
-    """Pontos e pesos de cada UF, calculados uma vez: a malha não muda entre consultas."""
+    """Pontos e pesos de cada UF, recalculados quando a ingestão atualiza a malha."""
+    await _refresh_geography(session)
     if not _national_samples:
         area = {
             row["ibge_code"]: row["area_km2"] or 0.0 for row in await municipality_areas(session)
@@ -573,6 +576,7 @@ async def get_territory_current(
 
 async def _state_points(session: AsyncSession, parent: str) -> tuple[str, list[Point]]:
     """UF e municípios do estado, já ordenados por dispersão espacial."""
+    await _refresh_geography(session)
     state = await territories.get_by_code(session, parent)
     if state is None:
         raise TerritoryNotFoundError(parent)
@@ -702,6 +706,7 @@ async def get_viewport_current(
     *,
     force: bool = False,
 ) -> WeatherCurrentResponse:
+    await _refresh_geography(session)
     visible = await viewport_repo.weather_points(session, bbox, parent=parent)
     if not visible:
         return WeatherCurrentResponse(fetched_at=datetime.now(UTC), cities=[])
@@ -745,9 +750,20 @@ async def get_viewport_current(
     return _response(cities, known.values(), outdated)
 
 
+async def _refresh_geography(session: AsyncSession) -> None:
+    """Amostras e grades compartilham a versão da malha, inclusive após o bootstrap."""
+    global _geography_version
+    version = await data_version(session)
+    if version != _geography_version:
+        _state_responses.clear()
+        _representatives.clear()
+        _national_samples.clear()
+        _geography_version = version
+
+
 def reset_state() -> None:
     """Esquece leituras, consultas e pausas — usado pelos testes."""
-    global _rate_limited_until, _rate_limit_error
+    global _rate_limited_until, _rate_limit_error, _geography_version
     _readings.clear()
     _state_responses.clear()
     _representatives.clear()
@@ -756,3 +772,4 @@ def reset_state() -> None:
     open_meteo_cooldown.reset()
     _rate_limited_until = 0.0
     _rate_limit_error = None
+    _geography_version = None

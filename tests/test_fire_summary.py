@@ -42,7 +42,7 @@ def test_density_compares_area_not_absolute_counts_and_preserves_zero_and_missin
     large, small, unknown, empty = result.municipalities
     assert large.count > small.count
     assert large.density == 10 and small.density == 200
-    assert large.count_24h == 100 and small.count_24h == 0
+    assert large.count_48h == 100 and small.count_48h == 20
     assert small.latest_detection_at == END - timedelta(hours=30)
     assert unknown.density is None and empty.density == 0
     assert empty.latest_detection_at is None
@@ -56,6 +56,19 @@ def test_unknown_municipality_preserves_total_without_fake_density():
     assert result.total == result.unassigned_count == 1
     with pytest.raises(ValueError, match="fora do período"):
         service.aggregate([row(2, "", 49)], [], END, 48)
+
+
+def test_recent_count_uses_48_hours_even_when_the_requested_window_is_longer():
+    areas = [dict(ibge_code="1100001", name="Teste", state="RO", area_km2=100)]
+    result = service.aggregate(
+        [row(1, "1100001", 30), row(2, "1100001", 48), row(3, "1100001", 49)],
+        areas,
+        END,
+        72,
+    )
+    [municipality] = result.municipalities
+    assert municipality.count == 3
+    assert municipality.count_48h == 2
 
 
 @respx.mock

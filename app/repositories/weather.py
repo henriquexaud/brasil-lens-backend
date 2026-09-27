@@ -111,14 +111,15 @@ _LIST_ACTIVE_ALERTS_SQL = text(
     """
 )
 
-# Última execução de cada job — o mesmo que `GET /weather/sources` expõe como
-# frescor por fonte. `DISTINCT ON` é o mesmo idioma que a resolução de
-# `latest` do overview já usa (services/territories.py).
+# Última execução concluída de cada job: um refresh em curso não torna os
+# dados publicados indisponíveis. Falhas concluídas continuam visíveis.
 _LATEST_RUN_PER_JOB_SQL = text(
     """
     SELECT DISTINCT ON (job) job, status::text AS status, started_at, finished_at, details
       FROM ingestion_runs
      WHERE job = ANY(CAST(:jobs AS text[]))
+       AND finished_at IS NOT NULL
+       AND status <> 'running'
      ORDER BY job, started_at DESC
     """
 )

@@ -142,13 +142,17 @@ RAIN_CODES = frozenset({*range(51, 68), *range(80, 83), 95, 96, 99})
 
 
 def _last_48h(hourly: dict[str, Any], until: int) -> float | None:
-    """Soma a chuva horária até o instante da leitura (as horas futuras ficam fora)."""
+    """Soma as 48 horas encerradas até a leitura, sem incluir horas futuras.
+
+    Cada valor da fonte acumula a hora anterior ao timestamp. O ponto exatamente
+    48 h antes da leitura pertence à hora anterior à janela, por isso fica fora.
+    """
     values = [
         value
         for time, value in zip(
             hourly.get("time", []), hourly.get("precipitation", []), strict=False
         )
-        if time <= until and value is not None
+        if until - 48 * 3600 < time <= until and value is not None
     ]
     return round(sum(values), 1) if values else None
 

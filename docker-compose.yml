@@ -62,11 +62,17 @@ services:
       READ_CACHE_TTL_SECONDS: ${READ_CACHE_TTL_SECONDS:-300}
       READ_CACHE_MAX_FEATURES: ${READ_CACHE_MAX_FEATURES:-200}
       HTTP_CACHE_MAX_AGE: ${HTTP_CACHE_MAX_AGE:-300}
+      INPE_QUEIMADAS_WFS_URL: ${INPE_QUEIMADAS_WFS_URL:-https://data.inpe.br/queimadas/geoserver/wfs}
+      INPE_QUEIMADAS_WMS_URL: ${INPE_QUEIMADAS_WMS_URL:-https://data.inpe.br/queimadas/geoserver/wms}
+      INPE_QUEIMADAS_HTTP_TIMEOUT: ${INPE_QUEIMADAS_HTTP_TIMEOUT:-30}
+      FIRE_HOTSPOTS_CACHE_TTL_SECONDS: ${FIRE_HOTSPOTS_CACHE_TTL_SECONDS:-600}
+      WEATHER_REFRESH_ENABLED: ${WEATHER_REFRESH_ENABLED:-true}
+      HYDROGRAPHY_WARMUP_ENABLED: ${HYDROGRAPHY_WARMUP_ENABLED:-true}
       IBGE_BASE_URL: ${IBGE_BASE_URL:-https://servicodados.ibge.gov.br}
       IBGE_HTTP_TIMEOUT: ${IBGE_HTTP_TIMEOUT:-120}
       IBGE_MAX_CONCURRENCY: ${IBGE_MAX_CONCURRENCY:-4}
-      GEOMETRY_OVERVIEW_TOLERANCE: ${GEOMETRY_OVERVIEW_TOLERANCE:-0.02}
-      GEOMETRY_DETAIL_TOLERANCE: ${GEOMETRY_DETAIL_TOLERANCE:-0.002}
+      GEOMETRY_OVERVIEW_TOLERANCE: ${GEOMETRY_OVERVIEW_TOLERANCE:-0.005}
+      GEOMETRY_DETAIL_TOLERANCE: ${GEOMETRY_DETAIL_TOLERANCE:-0.001}
     # As migrations rodam antes do servidor: um banco novo já sobe com o schema,
     # e quem avalia não precisa lembrar de um passo a mais. Em banco atualizado,
     # `alembic upgrade head` não faz nada.
@@ -84,7 +90,7 @@ services:
 
   web:
     build:
-      context: ${FRONTEND_CONTEXT:-../frontend}
+      context: ${FRONTEND_CONTEXT:-https://github.com/henriquexaud/brasil-lens-frontend.git#main}
       args:
         # Assado no bundle: URL da API para o navegador. Com '/api/v1' (padrão), o
         # nginx faz proxy reverso para a api interna, funcionando em qualquer IP ou domínio.

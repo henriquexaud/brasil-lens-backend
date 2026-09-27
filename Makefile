@@ -31,7 +31,7 @@ migrate:        ## Aplica as migrations (a API já faz isso ao subir)
 	$(COMPOSE) run --rm api alembic upgrade head
 
 revision:       ## Cria migration nova: make revision m="mensagem"
-	$(DEV) run --rm api alembic revision -m "$(m)"
+	$(DEV) run --rm --build api alembic revision -m "$(m)"
 
 ingest:         ## Importa territórios e geometrias do IBGE para o mapa
 	$(COMPOSE) run --rm api python -m app.jobs.bootstrap
@@ -40,13 +40,13 @@ ingest-quick:   ## Ingestão sem geometrias municipais
 	$(COMPOSE) run --rm api python -m app.jobs.bootstrap --skip-municipal-geometries
 
 test:           ## Roda os testes (unitários + integração com banco)
-	$(DEV) run --rm api sh -c "alembic upgrade head && pytest -q"
+	$(DEV) run --rm --build api sh -c "alembic upgrade head && pytest -q"
 
 lint:           ## Ruff + mypy
-	$(DEV) run --rm --no-deps api sh -c "ruff check app tests && ruff format --check app tests && mypy app"
+	$(DEV) run --rm --build --no-deps api sh -c "ruff check app tests && ruff format --check app tests && mypy app"
 
 format:         ## Formata o código
-	$(DEV) run --rm --no-deps api ruff format app tests
+	$(DEV) run --rm --build --no-deps api ruff format app tests
 
 check:          ## Tudo que um CI checaria: testes + lint
 	$(MAKE) test && $(MAKE) lint
