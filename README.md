@@ -4,7 +4,7 @@ API de clima e meio ambiente do Brasil. Combina geografia do IBGE com condiçõe
 
 ## Componentes e dependências
 
-A aplicação tem três componentes que se comunicam por HTTP: [frontend React](https://github.com/henriquexaud/brasil-lens-frontend), esta API FastAPI e APIs públicas externas. PostgreSQL 16 com PostGIS 3.4 persiste geografia, dados ambientais e municípios acompanhados; Redis 7.4 complementa o cache local e pode ficar indisponível sem impedir as consultas.
+Esta API serve o [frontend React](https://github.com/henriquexaud/brasil-lens-frontend) e integra fontes públicas externas. PostgreSQL 16 com PostGIS 3.4 persiste geografia, dados ambientais e municípios acompanhados; Redis 7.4 complementa o cache local e pode ficar indisponível sem impedir as consultas.
 
 O IBGE fornece territórios e malhas por APIs REST públicas e gratuitas. Os jobs processam esses dados e os gravam no PostGIS; o frontend recebe GeoJSON desta API. Open-Meteo, INMET, CEMADEN, INPE e ANA complementam a experiência ambiental. Veja a [arquitetura e integrações](docs/ARCHITECTURE.md).
 
@@ -44,18 +44,11 @@ A stack funciona sem `.env`. Para personalizar, copie `.env.example` para `.env`
 
 No Compose, `DATABASE_URL` é montada a partir de `POSTGRES_*`. Para execução direta no host, a aplicação lê `DATABASE_URL` do ambiente/`.env`; `REDIS_URL` deve apontar para um Redis acessível pelo host ou ficar vazia para usar apenas cache local. Os parâmetros Python adicionais estão em `app/core/config.py`.
 
-## Operações da interface
+## API
 
-| Método | Rota | Funcionalidade |
-|---|---|---|
-| GET | `/api/v1/map` | Explora a malha territorial |
-| GET | `/api/v1/me/followed-municipalities` | Lista municípios acompanhados |
-| POST | `/api/v1/territories/locate` | Localiza município pelas coordenadas |
-| PUT | `/api/v1/me/followed-municipalities/{code}` | Acompanha município |
-| DELETE | `/api/v1/me/followed-municipalities/{code}` | Deixa de acompanhar município |
-| POST | `/api/v1/me/followed-municipalities/{code}/notifications` | Configura avisos no acompanhamento |
+Todas as rotas ficam em `/api/v1`: malha territorial e busca, localização por coordenadas, clima e previsão, alertas, focos de calor, hidrografia e municípios acompanhados. A [referência da API](docs/API_REFERENCE.md) resume as rotas; os contratos completos ficam no Swagger.
 
-O MVP usa um usuário fixo `local`, sem autenticação; a lista de municípios acompanhados é compartilhada nesta instalação. A preferência de avisos é persistida, mas não há envio de notificações por push, e-mail ou outro canal. Os quatro métodos são consumidos pelo frontend. Há também rotas de clima, previsão, alertas, hidrografia e focos. Veja a [referência da API](docs/API_REFERENCE.md); os contratos completos ficam no Swagger.
+Ainda não há autenticação: a instalação tem um único usuário (`local`), então a lista de municípios acompanhados é compartilhada por quem acessa a mesma instância. A preferência de avisos é persistida, mas nenhum aviso é enviado por enquanto.
 
 ## Desenvolvimento e verificação
 

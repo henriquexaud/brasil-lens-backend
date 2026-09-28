@@ -12,9 +12,7 @@ flowchart LR
     API -->|"REST / JSON / GeoJSON"| Fontes["IBGE, Open-Meteo, INMET, CEMADEN, INPE, ANA"]
 ```
 
-Frontend e backend têm [repositórios](https://github.com/henriquexaud/brasil-lens-frontend) [públicos separados](https://github.com/henriquexaud/brasil-lens-backend), Dockerfiles e READMEs próprios. As APIs externas formam o terceiro componente: seus dados são processados e integrados ao domínio, sem credenciais pagas. O Compose completo fica no backend; um Compose adicional na pasta de trabalho permite desenvolver clones locais juntos.
-
-A interface usa GET para consultas, POST para localização por coordenadas e preferências de avisos, PUT para acompanhar municípios e DELETE para removê-los. A API oferece mais de quatro operações e persiste o acompanhamento no PostgreSQL. Mapas ambientais, interpolação, alertas e densidade espacial constituem as funcionalidades além do CRUD.
+Frontend e backend têm [repositórios](https://github.com/henriquexaud/brasil-lens-frontend) [separados](https://github.com/henriquexaud/brasil-lens-backend), com Dockerfiles e READMEs próprios. Os dados das fontes externas são processados e integrados ao domínio pela API; o navegador consome apenas contratos próprios, com exceção dos tiles do mapa base e da camada WMS de focos. O Compose completo fica no backend; um Compose adicional na pasta de trabalho permite desenvolver clones locais juntos.
 
 ## Domínio territorial
 
@@ -45,6 +43,4 @@ O agendador atualiza alertas do INMET e CEMADEN no processo da API; condições 
 
 ## Persistência
 
-As tabelas vigentes mantêm geografia, proveniência de ingestão, estações, observações, alertas e municípios acompanhados. A migration `0009` remove tabelas e enums do antigo catálogo estatístico e das coropletas anuais. Ela preserva territórios, geometrias, PostGIS e modelos ambientais.
-
-Antes de aplicar `0009_remove_socioeconomic`, faça backup do banco. O upgrade exclui os dados estatísticos e as visualizações salvas, além dos datasets e registros de ingestão exclusivos desse domínio que não tenham referências geográficas ou ambientais. O downgrade restaura o schema anterior, incluindo constraints, índices e enums; recuperar dados excluídos exige restaurar o backup. As migrations anteriores permanecem no histórico para instalações novas e upgrades de bancos existentes.
+As tabelas vigentes mantêm geografia, proveniência de ingestão, estações, observações, alertas e municípios acompanhados. As migrations antigas permanecem no histórico para instalações novas; a `0009` removeu o antigo catálogo estatístico e exclui esses dados ao ser aplicada, então faça backup antes de atualizar um banco anterior a ela.

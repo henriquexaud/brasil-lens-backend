@@ -74,8 +74,7 @@ services:
       GEOMETRY_OVERVIEW_TOLERANCE: ${GEOMETRY_OVERVIEW_TOLERANCE:-0.005}
       GEOMETRY_DETAIL_TOLERANCE: ${GEOMETRY_DETAIL_TOLERANCE:-0.001}
     # As migrations rodam antes do servidor: um banco novo já sobe com o schema,
-    # e quem avalia não precisa lembrar de um passo a mais. Em banco atualizado,
-    # `alembic upgrade head` não faz nada.
+    # sem passo manual. Em banco atualizado, `alembic upgrade head` não faz nada.
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     ports:
       - "${API_PORT:-8000}:8000"
