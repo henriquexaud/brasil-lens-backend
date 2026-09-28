@@ -31,8 +31,8 @@ async def _warm_up() -> None:
             await state_areas(session)
         except Exception:
             logger.warning("api.warm_up_areas_failed", exc_info=True)
-        if settings.hydrography_warmup_enabled:
-            await hydrography.warm_up(session)
+    if settings.hydrography_warmup_enabled:
+        await hydrography.warm_up()
 
 
 @asynccontextmanager

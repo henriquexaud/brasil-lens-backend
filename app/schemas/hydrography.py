@@ -30,8 +30,6 @@ class HydroFeature(CamelModel):
 
 
 class HydroMetadata(CamelModel):
-    level: str
-    parent_code: str | None = None
     status: Literal["ok", "partial"] = "ok"
     river_count: int
     water_body_count: int

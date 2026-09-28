@@ -1,3 +1,4 @@
+import asyncio
 from unittest.mock import AsyncMock
 
 import httpx
@@ -95,7 +96,7 @@ def test_consolidate_river_segments_groups_into_complete_rivers() -> None:
     assert amazonas.properties.drainage_area_km2 == 6042610.0
     assert amazonas.properties.segment_count == 2
     assert amazonas.geometry["type"] == "MultiLineString"
-    assert len(amazonas.geometry["coordinates"]) == 2
+    assert amazonas.geometry["coordinates"] == [[[-52.0, -0.1], [-51.0, -0.05], [-50.5, 0.1]]]
 
     tiete = consolidated[1]
     assert tiete.properties.name == "Rio Tietê"
@@ -113,14 +114,13 @@ def test_major_rivers_snapshot_loaded_and_sorted() -> None:
         assert r.bbox is not None
 
 
-@pytest.mark.asyncio
-async def test_country_only_returns_major_axes_with_reduced_geometry() -> None:
-    session = AsyncMock()
-    result = await service.get_hydrography(session, level="country", include_water_bodies=False)
+async def test_country_only_returns_major_axes_with_reduced_geometry(monkeypatch) -> None:
+    monkeypatch.setattr(service, "_fetch_water_bodies", AsyncMock(return_value=[]))
+    result = await service.get_hydrography()
     assert isinstance(result, HydroFeatureCollection)
-    assert result.metadata.level == "country"
     assert 0 < result.metadata.river_count < len(service._MAJOR_RIVERS)
-    assert len(result.model_dump_json()) < 200000
+    assert len(result.model_dump_json()) < 100000
+    assert sum(len(f.geometry["coordinates"]) for f in result.features) < 100
     assert all((feature.properties.drainage_area_km2 or 0) >= 200000 for feature in result.features)
     names = {f.properties.name for f in result.features}
     assert "Rio São Francisco" in names
@@ -152,29 +152,67 @@ async def test_ana_outage_pauses_calls_and_serves_partial_snapshot(monkeypatch) 
     monkeypatch.setattr(service, "_fetch_rivers", rivers)
     monkeypatch.setattr(service, "_fetch_water_bodies", bodies)
 
-    first = await service.get_hydrography(
-        AsyncMock(), level="state", bbox=(-47.0, -24.0, -46.0, -23.0), zoom=8
-    )
-    second = await service.get_hydrography(
-        AsyncMock(), level="state", bbox=(-45.0, -23.0, -44.0, -22.0), zoom=8
-    )
+    first = await service.get_hydrography(bbox=(-47.0, -24.0, -46.0, -23.0), zoom=8)
+    second = await service.get_hydrography(bbox=(-45.0, -23.0, -44.0, -22.0), zoom=8)
 
     assert first.metadata.status == second.metadata.status == "partial"
-    assert rivers.call_count == 1
-    assert bodies.call_count == 0
+    assert rivers.call_count == bodies.call_count == 1
 
 
 async def test_national_scale_shares_one_cache_entry_for_any_framing(monkeypatch):
     service._cache.clear()
     bodies = AsyncMock(return_value=[])
     monkeypatch.setattr(service, "_fetch_water_bodies", bodies)
-    first = await service.get_hydrography(AsyncMock(), zoom=4, bbox=(-60, -30, -40, -10))
-    second = await service.get_hydrography(
-        AsyncMock(), zoom=4, bbox=(-55, -25, -35, -5), parent_code="35"
-    )
+    first = await service.get_hydrography(zoom=4, bbox=(-60, -30, -40, -10))
+    second = await service.get_hydrography(zoom=4.5, bbox=(-55, -25, -35, -5))
     assert first is second
     assert bodies.call_count == 1
     assert first.bbox == service.BRAZIL_BBOX
-    await service.warm_up(AsyncMock())
+    await service.warm_up()
     assert bodies.call_count == 1
     service._cache.clear()
+
+
+def test_river_segments_are_chained_from_the_headwater() -> None:
+    lines = [[[2, 0], [3, 0]], [[0, 0], [1, 0]], [[1, 0], [2, 0]], [[1, 0], [1, 1]]]
+    assert service._merge_lines(lines) == [[[0, 0], [1, 0], [2, 0], [3, 0]], [[1, 0], [1, 1]]]
+
+
+def test_water_bodies_drop_rings_of_a_few_pixels() -> None:
+    def square(west: float, south: float, side: float) -> list[list[float]]:
+        return [
+            [west, south],
+            [west + side, south],
+            [west + side, south + side],
+            [west, south + side],
+            [west, south],
+        ]
+
+    lake = {"type": "Polygon", "coordinates": [square(0, 0, 1), square(0.5, 0.5, 0.01)]}
+    assert service._visible_rings(lake, 0.001) == {
+        "type": "Polygon",
+        "coordinates": [square(0, 0, 1)],
+    }
+    specks = {"type": "MultiPolygon", "coordinates": [[square(0, 0, 0.01)], [square(2, 2, 0.02)]]}
+    assert service._visible_rings(specks, 0.001) is None
+
+
+async def test_ana_batches_run_in_parallel_and_keep_order() -> None:
+    in_flight = peak = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal in_flight, peak
+        if request.url.params.get("returnIdsOnly"):
+            return httpx.Response(200, json={"objectIds": list(range(600))})
+        in_flight += 1
+        peak = max(peak, in_flight)
+        await asyncio.sleep(0.01)
+        in_flight -= 1
+        ids = request.url.params["objectIds"].split(",")
+        return httpx.Response(200, json={"features": [{"id": i} for i in ids]})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        features = await service._query_features(client, "https://ana.test/query", {})
+
+    assert [feature["id"] for feature in features] == [str(i) for i in range(600)]
+    assert peak == 3

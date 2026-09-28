@@ -15,9 +15,10 @@ Código: `api/v1/map.py`, `territories.py` · `services/map.py`, `territories.py
 
 ## Hidrografia (ANA/SNIRH)
 
-`GET /hydrography` (`services/hydrography.py`):
-- **Zoom < 6:** só o snapshot `services/data/major_rivers.json`, filtrado por área de drenagem, sem rede e com uma única entrada de cache para qualquer enquadramento.
-- **Zoom ≥ 6:** ArcGIS REST do SNIRH (rios e massas d'água) na caixa do recorte, com o detalhe definido por `hydro_detail(zoom)`; os rios são consolidados, recortados e simplificados.
-- **Área pedida:** o frontend encaixa o bbox numa grade (1° no zoom 6–8, 0,5° no 8–10, 0,25° acima) e não manda bbox abaixo do zoom 6, para que pans pequenos reaproveitem a mesma chave de cache e a mesma chamada à ANA.
-- **Cache:** 24 h em memória e no Redis. Se a ANA falha, entra o cooldown de 60 s, os rios caem para o snapshot, os lagos saem, a resposta vira `partial` e o cache dura só 60 s (sem Redis).
+`GET /hydrography?zoom=&bbox=` (`services/hydrography.py`). Só o zoom e a área definem a resposta; a rota não usa o banco.
+- **Zoom < 6:** rios do snapshot `services/data/major_rivers.json`, filtrados por área de drenagem, e lagos grandes da ANA no recorte do Brasil. O bbox é ignorado: uma só entrada de cache para qualquer enquadramento, aquecida no `lifespan`.
+- **Zoom ≥ 6:** ArcGIS REST do SNIRH (rios e massas d'água) na área pedida, com o detalhe definido por `hydro_detail(zoom)`. Rios e lagos saem em paralelo, assim como os lotes de 250 feições, com no máximo 4 conexões com a ANA.
+- **Peso:** os trechos de cada rio são emendados (`_merge_lines`) e depois simplificados e recortados. Anéis de lago, ilha ou buraco com área menor que `(4 × tolerância)²`, poucos pixels no detalhe, são descartados (`_visible_rings`). Nas escalas nacional e regional, isso reduz a resposta a menos da metade.
+- **Área pedida:** o frontend encaixa o bbox numa grade (1° no zoom 6–8, 0,5° no 8–10, 0,25° acima), reaproveita qualquer área já carregada que cubra a vista e não manda bbox abaixo do zoom 6.
+- **Cache:** chave `(detalhe, área)`, 24 h em memória e no Redis, com HTTP `max-age` de 1 h. Se a ANA falha, entra o cooldown de 60 s, os rios caem para o snapshot, os lagos saem e a resposta vira `partial`, com cache de só 60 s (sem Redis, e o mesmo `max-age`).
 - Testes: `test_hydrography.py`.

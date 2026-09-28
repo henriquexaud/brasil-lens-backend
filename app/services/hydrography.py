@@ -2,19 +2,18 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Coroutine
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
 from weakref import WeakValueDictionary
 
 import httpx
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import redis_cache
 from app.core.cache import TTLCache
 from app.core.cooldown import SourceCooldown
 from app.core.logging import get_logger
-from app.repositories import territories as territories_repo
 from app.schemas.hydrography import (
     HydroFeature,
     HydroFeatureCollection,
@@ -55,7 +54,10 @@ def _init_major_rivers() -> list[HydroFeature]:
                 props = item.get("properties", {})
                 feat = HydroFeature(
                     id=item.get("id", f"river:{props.get('name', 'rio')}"),
-                    geometry=item.get("geometry", {}),
+                    geometry={
+                        "type": "MultiLineString",
+                        "coordinates": _merge_lines(item["geometry"]["coordinates"]),
+                    },
                     properties=HydroFeatureProperties(
                         id=props.get("id", ""),
                         name=props.get("name", "Rio"),
@@ -80,6 +82,35 @@ def _init_major_rivers() -> list[HydroFeature]:
             logger.warning("Falha ao carregar snapshot de rios principais: %s", exc)
 
     return _MAJOR_RIVERS
+
+
+def _merge_lines(lines: list[list[list[float]]]) -> list[list[list[float]]]:
+    """Emenda os trechos em que um começa onde o outro termina.
+
+    A ANA entrega cada rio picado em trechos entre confluências; emendados, o mesmo
+    traçado sai com uma fração das partes e sem repetir o ponto de cada junção.
+    """
+    lines = [line for line in lines if line]
+    by_start: dict[tuple[float, ...], list[int]] = {}
+    for index, line in enumerate(lines):
+        by_start.setdefault(tuple(line[0]), []).append(index)
+    continued = {tuple(line[-1]) for line in lines}
+    used: set[int] = set()
+    merged: list[list[list[float]]] = []
+    # Cabeceiras primeiro, para cada cadeia começar no trecho mais a montante.
+    for index in sorted(range(len(lines)), key=lambda i: tuple(lines[i][0]) in continued):
+        if index in used:
+            continue
+        used.add(index)
+        chain = list(lines[index])
+        while True:
+            following = [i for i in by_start.get(tuple(chain[-1]), ()) if i not in used]
+            if not following:
+                break
+            used.add(following[0])
+            chain.extend(lines[following[0]][1:])
+        merged.append(chain)
+    return merged
 
 
 _init_major_rivers()
@@ -147,7 +178,7 @@ def _consolidate_river_segments(raw_features: list[dict[str, Any]]) -> list[Hydr
         results.append(
             HydroFeature(
                 id=feat_id,
-                geometry={"type": "MultiLineString", "coordinates": entry["lines"]},
+                geometry={"type": "MultiLineString", "coordinates": _merge_lines(entry["lines"])},
                 properties=HydroFeatureProperties(
                     id=feat_id,
                     name=name,
@@ -244,6 +275,30 @@ def _visible_river(
     )
 
 
+def _ring_area(ring: list[list[float]]) -> float:
+    return abs(sum(a[0] * b[1] - b[0] * a[1] for a, b in pairwise(ring))) / 2
+
+
+def _visible_rings(geometry: dict[str, Any], min_area: float) -> dict[str, Any] | None:
+    """Tira lagoas, ilhas e buracos com poucos pixels nesse detalhe.
+
+    Nas escalas regional e nacional, esses anéis eram metade dos pontos da camada.
+    """
+    polygons = (
+        [geometry["coordinates"]] if geometry["type"] == "Polygon" else geometry["coordinates"]
+    )
+    kept = [
+        [outer, *(hole for hole in holes if _ring_area(hole) >= min_area)]
+        for outer, *holes in polygons
+        if _ring_area(outer) >= min_area
+    ]
+    if not kept:
+        return None
+    if len(kept) == 1:
+        return {"type": "Polygon", "coordinates": kept[0]}
+    return {"type": "MultiPolygon", "coordinates": kept}
+
+
 async def _query_features(
     client: httpx.AsyncClient, url: str, params: dict[str, str]
 ) -> list[dict[str, Any]]:
@@ -255,12 +310,21 @@ async def _query_features(
     if "objectIds" not in ids_data:
         raise ValueError("ANA não respondeu com os IDs solicitados")
     ids = ids_data["objectIds"] or []
-    features = []
-    for offset in range(0, len(ids), 250):
-        response = await client.get(
-            url,
-            params={**params, "objectIds": ",".join(str(x) for x in ids[offset : offset + 250])},
+    # Os lotes saem em paralelo; o pool do cliente limita quantos vão à ANA de cada vez.
+    responses = await asyncio.gather(
+        *(
+            client.get(
+                url,
+                params={
+                    **params,
+                    "objectIds": ",".join(str(x) for x in ids[offset : offset + 250]),
+                },
+            )
+            for offset in range(0, len(ids), 250)
         )
+    )
+    features = []
+    for response in responses:
         response.raise_for_status()
         data = response.json()
         if "features" not in data or data.get("exceededTransferLimit"):
@@ -316,14 +380,15 @@ async def _fetch_water_bodies(
     )
     features = []
     for item in raw:
-        if not item.get("geometry"):
+        geometry = item.get("geometry") and _visible_rings(item["geometry"], (4 * tolerance) ** 2)
+        if not geometry:
             continue
         props = item["properties"]
         identifier = f"water_body:{props['gid']}"
         features.append(
             HydroFeature(
                 id=identifier,
-                geometry=item["geometry"],
+                geometry=geometry,
                 properties=HydroFeatureProperties(
                     id=identifier,
                     name=(props.get("nmoriginal") or "").strip() or "Corpo d’água",
@@ -337,28 +402,20 @@ async def _fetch_water_bodies(
     return features
 
 
+async def _or_none(fetch: Coroutine[Any, Any, list[HydroFeature]]) -> list[HydroFeature] | None:
+    try:
+        return await fetch
+    except (httpx.HTTPError, ValueError, KeyError):
+        logger.warning("hydrography.ana_unavailable", exc_info=True)
+        return None
+
+
 async def get_hydrography(
-    session: AsyncSession,
-    *,
-    level: str = "country",
-    parent_code: str | None = None,
-    bbox: tuple[float, float, float, float] | None = None,
-    include_water_bodies: bool = True,
-    include_rivers: bool = True,
-    zoom: float = 4,
+    *, zoom: float = 4, bbox: tuple[float, float, float, float] | None = None
 ) -> HydroFeatureCollection:
     drainage, _, tolerance = hydro_detail(zoom)
-    if level == "country" and zoom < 6:
-        parent_code, bbox = None, None
-    effective_bbox = bbox
-    if effective_bbox is None and parent_code:
-        territory = await territories_repo.get_by_code(session, parent_code)
-        if territory and territory.bbox:
-            effective_bbox = territory.bbox
-    effective_bbox = effective_bbox or BRAZIL_BBOX
-    key = (
-        f"{level}:{parent_code}:{effective_bbox}:{drainage}:{include_water_bodies}:{include_rivers}"
-    )
+    area = bbox if zoom >= 6 and bbox else BRAZIL_BBOX
+    key = f"{drainage}:{area}"
     lock = _locks.setdefault(key, asyncio.Lock())
     async with lock:
         cached = _cache.get(key)
@@ -368,52 +425,38 @@ async def get_hydrography(
         if cached is not None:
             _cache.set(key, cached, ttl_seconds=30)
             return cached
-        bodies: list[HydroFeature] = []
-        partial = False
-        snapshot_rivers = [
+        snapshot = [
             river
             for river in _MAJOR_RIVERS
             if (river.properties.drainage_area_km2 or 0) >= drainage
         ]
-        rivers = snapshot_rivers if include_rivers and zoom < 6 else []
-        needs_ana = (include_rivers and zoom >= 6) or include_water_bodies
-        if needs_ana and ana_cooldown.active:
-            partial = True
-            if include_rivers and zoom >= 6:
-                rivers = snapshot_rivers
-        elif needs_ana:
+        rivers: list[HydroFeature] | None = snapshot
+        bodies: list[HydroFeature] | None = None
+        if not ana_cooldown.active:
             async with httpx.AsyncClient(
-                timeout=30, headers={"User-Agent": "BrasilLens/1.0"}
+                timeout=httpx.Timeout(30, pool=None),
+                limits=httpx.Limits(max_connections=4),
+                headers={"User-Agent": "BrasilLens/1.0"},
             ) as client:
-                if include_rivers and zoom >= 6:
-                    try:
-                        rivers = await _fetch_rivers(client, zoom, effective_bbox)
-                    except (httpx.HTTPError, ValueError, KeyError):
-                        partial = True
-                        rivers = snapshot_rivers
-                        ana_cooldown.trip()
-                        logger.warning("ANA rios indisponível; usando eixos do snapshot")
-                if include_water_bodies and not ana_cooldown.active:
-                    try:
-                        bodies = await _fetch_water_bodies(client, zoom, effective_bbox)
-                    except (httpx.HTTPError, ValueError, KeyError):
-                        partial = True
-                        ana_cooldown.trip()
-                        logger.warning("ANA massas de água indisponível")
-                elif include_water_bodies:
-                    partial = True
-        visible = [
-            part for river in rivers if (part := _visible_river(river, effective_bbox, tolerance))
-        ]
+                fetches = [_or_none(_fetch_water_bodies(client, zoom, area))]
+                if zoom >= 6:
+                    fetches.append(_or_none(_fetch_rivers(client, zoom, area)))
+                bodies, *ana_rivers = await asyncio.gather(*fetches)
+            rivers = ana_rivers[0] if ana_rivers else snapshot
+            if bodies is None or rivers is None:
+                ana_cooldown.trip()
+        partial = bodies is None or rivers is None
+        if rivers is None:
+            rivers = snapshot
+        bodies = bodies or []
+        visible = [part for river in rivers if (part := _visible_river(river, area, tolerance))]
         result = HydroFeatureCollection(
             metadata=HydroMetadata(
-                level=level,
-                parent_code=parent_code,
                 river_count=len(visible),
                 water_body_count=len(bodies),
                 status="partial" if partial else "ok",
             ),
-            bbox=effective_bbox,
+            bbox=area,
             features=visible + bodies,
         )
         if partial:
@@ -424,8 +467,8 @@ async def get_hydrography(
         return result
 
 
-async def warm_up(session: AsyncSession) -> None:
+async def warm_up() -> None:
     try:
-        await get_hydrography(session)
+        await get_hydrography()
     except Exception:
         logger.warning("hydrography.warm_up_failed", exc_info=True)
