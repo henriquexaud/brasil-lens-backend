@@ -23,3 +23,8 @@ def test_postgres_scheme_and_asyncpg_url_without_ssl_are_accepted() -> None:
         Settings(database_url="postgresql+asyncpg://u:p@db:5432/x").database_url
         == "postgresql+asyncpg://u:p@db:5432/x"
     )
+
+
+def test_relay_key_pasted_with_a_line_break_still_works() -> None:
+    assert Settings(open_meteo_relay_key="abc123\n").open_meteo_relay_key == "abc123"
+    assert Settings(open_meteo_relay_key="  \n").open_meteo_relay_key is None

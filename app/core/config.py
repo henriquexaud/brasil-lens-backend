@@ -80,6 +80,13 @@ class Settings(BaseSettings):
         url = url.set(drivername="postgresql+asyncpg", query=query)
         return url.render_as_string(hide_password=False)
 
+    @field_validator("open_meteo_relay_key")
+    @classmethod
+    def _strip_relay_key(cls, value: str | None) -> str | None:
+        # Colada num painel, a chave pode vir com quebra de linha, que o httpx recusa
+        # em header (e o erro expõe o valor no log).
+        return (value or "").strip() or None
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_origins(cls, value: object) -> object:
