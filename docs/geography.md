@@ -18,5 +18,6 @@ Código: `api/v1/map.py`, `territories.py` · `services/map.py`, `territories.py
 `GET /hydrography` (`services/hydrography.py`):
 - **Zoom < 6:** só o snapshot `services/data/major_rivers.json`, filtrado por área de drenagem, sem rede e com uma única entrada de cache para qualquer enquadramento.
 - **Zoom ≥ 6:** ArcGIS REST do SNIRH (rios e massas d'água) na caixa do recorte, com o detalhe definido por `hydro_detail(zoom)`; os rios são consolidados, recortados e simplificados.
+- **Área pedida:** o frontend encaixa o bbox numa grade (1° no zoom 6–8, 0,5° no 8–10, 0,25° acima) e não manda bbox abaixo do zoom 6, para que pans pequenos reaproveitem a mesma chave de cache e a mesma chamada à ANA.
 - **Cache:** 24 h em memória e no Redis. Se a ANA falha, entra o cooldown de 60 s, os rios caem para o snapshot, os lagos saem, a resposta vira `partial` e o cache dura só 60 s (sem Redis).
 - Testes: `test_hydrography.py`.
