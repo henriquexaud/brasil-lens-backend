@@ -16,10 +16,10 @@ COPY app ./app
 COPY alembic ./alembic
 COPY alembic.ini ./
 
-# Migrations na subida porque o plano grátis do Render não tem pre-deploy. A porta vem de
-# $PORT (o Render injeta a dele) e o IP/esquema do cliente, do proxy à frente.
+# Migrations na subida porque o plano grátis do Render não tem pre-deploy; `app.server`
+# as aplica no mesmo processo do uvicorn, na porta de $PORT (o Render injeta a dele).
 EXPOSE 8000
-CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*'"]
+CMD ["python", "-m", "app.server"]
 
 # O Compose de desenvolvimento usa este target para testes e ferramentas.
 FROM base AS development

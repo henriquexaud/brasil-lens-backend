@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from hashlib import blake2b
+from typing import NamedTuple
 
 import orjson
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +11,7 @@ from app.core.cache import TTLCache
 from app.core.config import settings
 from app.repositories import weather as weather_repo
 from app.repositories.weather import SourceStatusRow
+from app.schemas.common import to_json
 from app.schemas.weather import (
     WeatherAlertCategory,
     WeatherAlertCollection,
@@ -72,7 +75,17 @@ _ALERTS_CACHE_KEY = "alerts"
 _stations_cache: TTLCache[WeatherStationCollection] = TTLCache(
     ttl_seconds=settings.weather_stations_cache_ttl_seconds, max_entries=1
 )
-_alerts_cache: TTLCache[WeatherAlertCollection] = TTLCache(
+
+
+class AlertsResponse(NamedTuple):
+    """JSON pronto e ETag: o frontend repete a consulta a cada 90 s, e na maioria das vezes
+    nada mudou (a ingestão roda a cada 10 min)."""
+
+    body: bytes
+    etag: str
+
+
+_alerts_cache: TTLCache[AlertsResponse] = TTLCache(
     ttl_seconds=settings.weather_alerts_cache_ttl_seconds, max_entries=1
 )
 
@@ -108,7 +121,7 @@ async def get_stations(session: AsyncSession) -> WeatherStationCollection:
     return collection
 
 
-async def get_alerts(session: AsyncSession) -> WeatherAlertCollection:
+async def get_alerts(session: AsyncSession) -> AlertsResponse:
     cached = _alerts_cache.get(_ALERTS_CACHE_KEY)
     if cached is not None:
         return cached
@@ -137,8 +150,10 @@ async def get_alerts(session: AsyncSession) -> WeatherAlertCollection:
             for row in rows
         ]
     )
-    _alerts_cache.set(_ALERTS_CACHE_KEY, collection)
-    return collection
+    body = to_json(collection)
+    alerts = AlertsResponse(body, f'W/"alerts:{blake2b(body, digest_size=8).hexdigest()}"')
+    _alerts_cache.set(_ALERTS_CACHE_KEY, alerts)
+    return alerts
 
 
 async def get_sources(session: AsyncSession) -> WeatherSourcesResponse:

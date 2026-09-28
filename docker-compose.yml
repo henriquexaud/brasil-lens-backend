@@ -74,7 +74,7 @@ services:
       GEOMETRY_DETAIL_TOLERANCE: ${GEOMETRY_DETAIL_TOLERANCE:-0.001}
     # As migrations rodam antes do servidor: um banco novo já sobe com o schema,
     # sem passo manual. Em banco atualizado, `alembic upgrade head` não faz nada.
-    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    command: python -m app.server
     ports:
       - "${API_PORT:-8000}:8000"
     # É este healthcheck que o `--wait` espera: ele só passa depois das

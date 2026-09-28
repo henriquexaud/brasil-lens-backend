@@ -1,9 +1,10 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_session
+from app.api.http import etag_matches
 from app.core.config import settings
 from app.core.errors import InvalidParameterError
 from app.repositories.boundaries import municipality_map
@@ -63,9 +64,15 @@ async def get_stations(
     summary="Alertas meteorológicos oficiais ainda ativos",
 )
 async def get_alerts(
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> WeatherAlertCollection:
-    return await weather_service.get_alerts(session)
+) -> Response:
+    alerts = await weather_service.get_alerts(session)
+    # `no-cache` guarda a resposta e revalida a cada consulta: sem mudança, volta um 304 vazio.
+    headers = {"ETag": alerts.etag, "Cache-Control": "no-cache"}
+    if etag_matches(request, alerts.etag):
+        return Response(status_code=304, headers=headers)
+    return Response(alerts.body, media_type="application/json", headers=headers)
 
 
 @router.get(

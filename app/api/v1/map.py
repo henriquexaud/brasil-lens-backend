@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_session
+from app.api.http import etag_matches
 from app.core.config import settings
 from app.models import TerritoryLevel
 from app.schemas.map import MapFeatureCollection, MapLod
@@ -30,8 +31,7 @@ def _conditional(request: Request, etag: str) -> tuple[dict[str, str], bool]:
             f"stale-while-revalidate={settings.map_http_stale_while_revalidate}"
         ),
     }
-    sent = {tag.strip() for tag in request.headers.get("if-none-match", "").split(",")}
-    return headers, etag in sent
+    return headers, etag_matches(request, etag)
 
 
 @router.get(

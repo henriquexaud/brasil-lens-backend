@@ -1,6 +1,6 @@
 # Alertas (INMET e CEMADEN)
 
-Alertas oficiais em vigor, gravados na tabela `weather_alerts`. Um agendador os ingere a cada 10 min (`jobs/weather_scheduler.py`, desligável com `WEATHER_REFRESH_ENABLED=false`) e `GET /weather/alerts` os lê do banco, com 90 s de cache. Um ciclo que falha é registrado em `ingestion_runs` e não apaga nada; `/weather/sources` mostra se cada job está `stale` (passou de 3 intervalos) ou `unavailable`.
+Alertas oficiais em vigor, gravados na tabela `weather_alerts`. Um agendador os ingere a cada 10 min (`jobs/weather_scheduler.py`, desligável com `WEATHER_REFRESH_ENABLED=false`) e `GET /weather/alerts` os lê do banco, com 90 s de cache do JSON pronto, ETag e `Cache-Control: no-cache`: o polling do frontend recebe `304` vazio enquanto nada muda. Os polígonos saem com 5 casas decimais (~1 m); as fontes mandam 8, o que dobrava a resposta. Um ciclo que falha é registrado em `ingestion_runs` e não apaga nada; `/weather/sources` mostra se cada job está `stale` (passou de 3 intervalos) ou `unavailable`.
 
 Código: `providers/inmet/alerts.py`, `providers/cemaden/alerts.py`, `jobs/_weather_alerts.py` (upsert em lote), `services/weather.py` (normalização).
 

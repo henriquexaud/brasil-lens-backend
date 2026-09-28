@@ -87,7 +87,7 @@ _LIST_ACTIVE_ALERTS_SQL = text(
            a.affected_ibge_codes,
            a.risks,
            a.instructions,
-           ST_AsGeoJSON(a.polygon) AS geometry_json
+           ST_AsGeoJSON(a.polygon, 5) AS geometry_json
       FROM weather_alerts a
      WHERE a.expires > now()
      ORDER BY a.onset DESC
