@@ -1,6 +1,8 @@
 # Clima (Open-Meteo)
 
-A Open-Meteo é aberta e sem chave, com cota de ~10 mil chamadas/dia por IP. Ela fornece as condições atuais, a previsão de 3 dias e a chuva horária das últimas 48 h. Código: `providers/open_meteo.py`, `services/weather_forecast.py` e `services/spatial_interpolation.py`. Testes: `test_weather_forecast.py`.
+A Open-Meteo é aberta e sem chave, com cota de ~10 mil chamadas/dia por IP. Ela fornece as condições atuais, a previsão de 3 dias e a chuva horária das últimas 48 h. Código: `providers/open_meteo.py`, `services/weather_forecast.py` e `services/spatial_interpolation.py`.
+
+Endereço: `OPEN_METEO_URL` (padrão `https://api.open-meteo.com`). Em produção ela aponta para o repasse da Vercel (`frontend/api/open-meteo/v1/forecast.ts`, [ADR-10](decisions.md)), e a API manda `OPEN_METEO_RELAY_KEY` no header `x-relay-key`; sem chave, a chamada vai direto, como no ambiente local. Testes: `test_weather_forecast.py`.
 
 ## O que é medido em cada escala
 

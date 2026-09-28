@@ -713,3 +713,29 @@ async def test_new_ingestion_rebuilds_national_weights_and_grid(monkeypatch) -> 
     assert sum(second[0].weights) == 2 * sum(first[0].weights)
     assert service._representatives == {}
     assert service._state_responses.get("35") is None
+
+
+@pytest.mark.parametrize(
+    ("url", "key", "expected_header"),
+    [
+        ("https://api.open-meteo.com", None, None),
+        ("https://relay.example/api/open-meteo", "segredo", "segredo"),
+    ],
+)
+async def test_open_meteo_goes_direct_by_default_and_through_the_relay_when_configured(
+    monkeypatch: pytest.MonkeyPatch, url: str, key: str | None, expected_header: str | None
+) -> None:
+    seen: list[httpx.AsyncClient] = []
+
+    async def fetch(client, locations, *, include_forecast):
+        seen.append(client)
+        return parsed(locations)
+
+    monkeypatch.setattr(service.settings, "open_meteo_url", url)
+    monkeypatch.setattr(service.settings, "open_meteo_relay_key", key)
+    monkeypatch.setattr(service, "fetch_locations", AsyncMock(side_effect=fetch))
+    await service.get_current(include_forecast=False)
+
+    request = seen[0].build_request("GET", "/v1/forecast")
+    assert str(request.url) == f"{url}/v1/forecast"
+    assert request.headers.get("x-relay-key") == expected_header

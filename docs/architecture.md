@@ -19,7 +19,7 @@ O navegador fala com a API pelo nginx (`/api/v1`). A API, em FastAPI, usa PostGI
 
 Camadas do backend, com dependência em um só sentido: `api/v1` → `services` → `repositories` (SQL/PostGIS) | `providers` (HTTP e normalização). Apoio: `schemas` (contratos), `jobs` (ingestão e agendador), `core` (config, erros, cache, cooldown). O `lifespan` de `main.py` inicia o agendador de alertas (a cada 10 min) e aquece as áreas municipais e a hidrografia.
 
-Em produção, o frontend fica na Vercel, a API no Render e o banco no Neon, sem Redis; sem o nginx, o navegador chama a API pela URL absoluta, liberada em `CORS_ORIGINS` ([ADR-09](decisions.md); passo a passo em [development](development.md#deploy)).
+Em produção, o frontend fica na Vercel, a API no Render e o banco no Neon, sem Redis; sem o nginx, o navegador chama a API pela URL absoluta, liberada em `CORS_ORIGINS`, e a API chama a Open-Meteo por um repasse na Vercel ([ADR-09](decisions.md), [ADR-10](decisions.md); passo a passo em [development](development.md#deploy)).
 
 Onde fica o estado: PostGIS guarda território, alertas, municípios acompanhados e proveniência; Redis guarda derivados compartilhados; a memória do processo guarda caches TTL, cooldowns e requisições em voo; o navegador guarda o cache do TanStack Query e o `sessionStorage`.
 
@@ -28,7 +28,7 @@ Onde fica o estado: PostGIS guarda território, alertas, municípios acompanhado
 - Rotas em `app/api/v1/router.py`; o contrato completo está no Swagger (`/docs`). JSON em camelCase (`CamelModel`), espelhado em `frontend/src/api/types.ts`.
 - Formato de erro: `{"error": {"code", "message", "details"}}`, com mensagem em pt-BR. Códigos: `invalid_parameter` 400, `not_found` 404, `conflict` 409, validação 422, `provider_error` 502, `provider_rate_limited` 503 (com `details.retryAfterSeconds`).
 - O payload das fontes externas traz `status`: `ok`, `stale` (vindo do fallback) ou `partial`. Quem consome deve mostrar esse status.
-- `/map` responde com ETag e `max-age=3600, stale-while-revalidate=86400`; as demais rotas geográficas, com `max-age=300`; as de acompanhamento, com `no-store`. Nas rotas de clima, `force=true` busca de novo leituras com mais de 5 min.
+- `/map` responde com ETag e `max-age=3600, stale-while-revalidate=86400`; `/weather/alerts`, com ETag e `no-cache` (o polling de 90 s recebe `304` vazio enquanto nada muda); as demais rotas geográficas, com `max-age=300`; as de acompanhamento, com `no-store`. Nas rotas de clima, `force=true` busca de novo leituras com mais de 5 min.
 - Acompanhamento (`/me/followed-municipalities/{code}`): PUT responde 201 com `Location` na primeira vez e 200 se já seguia; DELETE responde 204; POST `.../notifications` liga ou desliga os avisos (404 se o município não é seguido). O usuário vem de `api/deps.get_current_user_id`, o único ponto a trocar quando houver autenticação.
 
 ## Cache e degradação

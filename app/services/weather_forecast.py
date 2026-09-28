@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import redis_cache
 from app.core.cache import TTLCache
+from app.core.config import settings
 from app.core.cooldown import SourceCooldown
 from app.core.errors import (
     InvalidParameterError,
@@ -35,7 +36,6 @@ from app.services.spatial_interpolation import interpolate_municipal_weather
 Point = tuple[str, str, str, float, float]
 Variant = Literal["current", "forecast"]
 
-OPEN_METEO_URL = "https://api.open-meteo.com"
 SELECTED_FRESHNESS = timedelta(minutes=15)
 MAP_FRESHNESS = timedelta(minutes=30)
 MIN_FRESHNESS_AFTER_FETCH = timedelta(minutes=2)
@@ -163,6 +163,11 @@ async def _save(readings: dict[str, WeatherReading]) -> None:
     await redis_cache.write_many(READINGS_NAMESPACE, readings, READING_TTL_SECONDS)
 
 
+def _relay_headers() -> dict[str, str]:
+    key = settings.open_meteo_relay_key
+    return {"x-relay-key": key} if key else {}
+
+
 async def _fetch_and_store(points: list[Point], variant: Variant) -> dict[str, WeatherReading]:
     if (limited := _rate_limit_cooldown()) is not None:
         raise limited
@@ -173,7 +178,9 @@ async def _fetch_and_store(points: list[Point], variant: Variant) -> dict[str, W
         )
     try:
         cities: list[WeatherCity] = []
-        async with httpx.AsyncClient(base_url=OPEN_METEO_URL, timeout=20.0) as client:
+        async with httpx.AsyncClient(
+            base_url=settings.open_meteo_url, timeout=20.0, headers=_relay_headers()
+        ) as client:
             for start in range(0, len(points), FETCH_CHUNK):
                 chunk = points[start : start + FETCH_CHUNK]
                 cities += await fetch_locations(

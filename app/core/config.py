@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     cemaden_http_timeout: float = 30.0
     cemaden_alert_validity_buffer_seconds: int = 3 * 600
 
+    # Em produção a Open-Meteo é chamada pelo repasse da Vercel (IP do Render compartilhado);
+    # sem chave, a chamada vai direto, como no ambiente local.
+    open_meteo_url: str = "https://api.open-meteo.com"
+    open_meteo_relay_key: str | None = None
+
     weather_refresh_enabled: bool = True
     hydrography_warmup_enabled: bool = True
     weather_refresh_interval_seconds: int = 600
