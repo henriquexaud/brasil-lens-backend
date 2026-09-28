@@ -2,6 +2,8 @@
 
 API de clima e meio ambiente do Brasil para o [frontend](https://github.com/henriquexaud/brasil-lens-frontend) do Brasil Lens. Combina a geografia do IBGE (PostGIS) com clima (Open-Meteo), alertas (INMET, CEMADEN), focos de calor (INPE) e hidrografia (ANA).
 
+No ar: aplicação em https://brasil-lens.vercel.app e API em https://brasil-lens-api.onrender.com/docs (plano grátis: o primeiro acesso após inatividade leva ~1 min).
+
 ## Rodar com Docker
 
 Requisitos: Docker e Docker Compose v2.
@@ -19,7 +21,7 @@ docker compose run --rm api python -m app.jobs.bootstrap   # ingestão do IBGE, 
 
 ## Configuração
 
-Funciona sem `.env`. Para personalizar, copie `.env.example`. As variáveis mais usadas: portas (`API_PORT`, `WEB_PORT`, `POSTGRES_PORT`), `FRONTEND_CONTEXT` (use `../frontend` para um clone local), `VITE_API_BASE_URL` (exige rebuild), `CORS_ORIGINS` e `WEATHER_REFRESH_ENABLED`. A lista completa está em `app/core/config.py`. Deploy grátis (Vercel + Render + Neon): [docs/development.md](docs/development.md#deploy).
+Funciona sem `.env`. Para personalizar, copie `.env.example`. As variáveis mais usadas: portas (`API_PORT`, `WEB_PORT`, `POSTGRES_PORT`), `FRONTEND_CONTEXT` (use `../frontend` para um clone local), `VITE_API_BASE_URL` (exige rebuild), `CORS_ORIGINS` e `WEATHER_REFRESH_ENABLED`. A lista completa está em `app/core/config.py`. Deploy (Vercel + Render + Neon): [docs/development.md](docs/development.md#deploy).
 
 ## Documentação
 

@@ -34,13 +34,31 @@ Instalação e variáveis de ambiente: [README](../README.md), `.env.example` e 
 
 Frontend na Vercel, API no Render e banco no Neon, todos no plano grátis ([ADR-09](decisions.md)).
 
-1. **Neon:** projeto Postgres 17 na região AWS `us-east-1`, a mesma do Render. No 17 o Neon traz PostGIS 3.5; no 16, a 3.3, mais antiga que a do Compose (3.4). Use a connection string direta, sem `-pooler` no host: com uma instância e até 10 conexões, o pooler não é necessário. Cole a URL como o Neon a entrega; `core/config.py` troca o driver para asyncpg e `sslmode` por `ssl`.
-2. **Ingestão**, uma vez, da sua máquina (o Render tem 0,1 de CPU): `docker run --rm -e DATABASE_URL='<url do Neon>' brasil-lens-api sh -c "alembic upgrade head && python -m app.jobs.bootstrap"`.
-3. **Render:** New → Blueprint com este repositório (`render.yaml`). Preencha `DATABASE_URL` e `CORS_ORIGINS` (a URL da Vercel, sem barra no fim). A imagem roda as migrations ao subir e escuta em `$PORT`. Sem `REDIS_URL`: com uma instância, o cache em memória basta.
-4. **Vercel:** importe o repositório do frontend (preset Vite) com `VITE_API_BASE_URL=https://<serviço>.onrender.com/api/v1`. O valor é fixado no build; se mudar, faça redeploy.
+| Parte | Endereço | Publica quando |
+|---|---|---|
+| Frontend | https://brasil-lens.vercel.app (projeto Vercel `brasil-lens`) | push na `main` do frontend |
+| API | https://brasil-lens-api.onrender.com (Swagger em `/docs`; serviço Render `srv-date5dugekts73affgeg`) | push na `main` deste repositório |
+| Banco | Neon, projeto `brasil-lens` (Postgres 17, AWS `us-east-1`) | migrations na subida da API |
 
-Limites que moldam o uso:
+Configuração: no Render, `DATABASE_URL`, `CORS_ORIGINS=https://brasil-lens.vercel.app`, `APP_ENV=production` e `LOG_FORMAT=json`, sem `REDIS_URL`; na Vercel, `VITE_API_BASE_URL=https://brasil-lens-api.onrender.com/api/v1`, fixada no build (se mudar, faça redeploy). O domínio da Vercel e o `CORS_ORIGINS` andam juntos.
+
+### Montar do zero (CLIs `neon`, `render` e `vercel`)
+
+1. **Neon:** `neon projects create --name brasil-lens --region-id aws-us-east-1 --pg-version 17 --database brasil_lens --set-context` e `export NEON_URL="$(neon connection-string --database-name brasil_lens)"`. O 17 traz PostGIS 3.5 (o 16, a 3.3). A connection string é a direta, sem `-pooler`: com uma instância e até 10 conexões, o pooler não é necessário. A URL entra como o Neon a entrega; `core/config.py` troca o driver para asyncpg e `sslmode` por `ssl`.
+2. **Ingestão**, da sua máquina (o Render tem 0,1 de CPU): `docker run --rm -e DATABASE_URL="$NEON_URL" brasil-lens-api sh -c "alembic upgrade head && python -m app.jobs.bootstrap"`. Idempotente; refazer muda o `data_version` e renova os caches.
+3. **Render:** `render services create --name brasil-lens-api --type web_service --repo https://github.com/henriquexaud/brasil-lens-backend --branch main --runtime docker --plan free --region virginia --health-check-path /api/v1/health --env-var "DATABASE_URL=$NEON_URL" --env-var "CORS_ORIGINS=https://brasil-lens.vercel.app" --env-var APP_ENV=production --env-var LOG_FORMAT=json --confirm`. A imagem roda as migrations ao subir, porque o plano grátis não tem pre-deploy, e escuta em `$PORT`.
+4. **Vercel**, na pasta do frontend: `vercel link --yes --project brasil-lens`, `printf '%s' "https://brasil-lens-api.onrender.com/api/v1" | vercel env add VITE_API_BASE_URL production --no-sensitive`, `vercel deploy --prod` e `vercel git connect`. O deploy automático exige o app da Vercel no GitHub com acesso ao repositório.
+
+### Operar
+
+- Logs: `render logs --resources srv-date5dugekts73affgeg --tail` e `vercel logs <url-do-deploy>`. Saúde: `curl https://brasil-lens-api.onrender.com/api/v1/health/ready`.
+- Trocar uma variável do Render: painel → Environment → Save and deploy. Na Vercel: `vercel env update <nome> production` e redeploy.
+- Nova migration entra no próximo deploy da API; nova ingestão é o passo 2.
+
+### Limites que moldam o uso
+
 - O Render dorme após 15 min sem tráfego e leva ~1 min para acordar. O agendador de alertas para junto e roda assim que a API acorda; os alertas do CEMADEN expiram sozinhos (invariante 10).
 - Não use pinger para manter o Render acordado: o agendador consultaria o banco a cada 10 min e esgotaria as 100 CU-h/mês do Neon, que dorme após 5 min sem consultas. O health check do Render usa `/health`, que não toca o banco.
-- A instância tem 512 MB. Medido com todas as malhas municipais em cache, o processo fica em ~150 MB, porque os caches de GeoJSON guardam JSON pronto ([architecture](architecture.md)).
+- A instância tem 512 MB e 0,1 de CPU. Medido com todas as malhas municipais em cache, o processo fica em ~150 MB, porque os caches de GeoJSON guardam JSON pronto ([architecture](architecture.md)).
 - O Neon tem 0,5 GB (o banco ocupa ~80 MB) e 5 GB/mês de egress; o cache do `/map` evita reler as malhas.
+- A cota da Open-Meteo é por IP, e o IP de saída do Render é compartilhado: `provider_rate_limited` pode aparecer mais que no ambiente local.
