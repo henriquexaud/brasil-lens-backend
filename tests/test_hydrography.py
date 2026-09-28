@@ -116,10 +116,10 @@ def test_major_rivers_snapshot_loaded_and_sorted() -> None:
 
 async def test_country_only_returns_major_axes_with_reduced_geometry(monkeypatch) -> None:
     monkeypatch.setattr(service, "_fetch_water_bodies", AsyncMock(return_value=[]))
-    result = await service.get_hydrography()
-    assert isinstance(result, HydroFeatureCollection)
+    response = await service.get_hydrography()
+    result = HydroFeatureCollection.model_validate_json(response.body)
     assert 0 < result.metadata.river_count < len(service._MAJOR_RIVERS)
-    assert len(result.model_dump_json()) < 100000
+    assert len(response.body) < 100000
     assert sum(len(f.geometry["coordinates"]) for f in result.features) < 100
     assert all((feature.properties.drainage_area_km2 or 0) >= 200000 for feature in result.features)
     names = {f.properties.name for f in result.features}
@@ -155,7 +155,7 @@ async def test_ana_outage_pauses_calls_and_serves_partial_snapshot(monkeypatch) 
     first = await service.get_hydrography(bbox=(-47.0, -24.0, -46.0, -23.0), zoom=8)
     second = await service.get_hydrography(bbox=(-45.0, -23.0, -44.0, -22.0), zoom=8)
 
-    assert first.metadata.status == second.metadata.status == "partial"
+    assert first.status == second.status == "partial"
     assert rivers.call_count == bodies.call_count == 1
 
 
@@ -167,7 +167,7 @@ async def test_national_scale_shares_one_cache_entry_for_any_framing(monkeypatch
     second = await service.get_hydrography(zoom=4.5, bbox=(-55, -25, -35, -5))
     assert first is second
     assert bodies.call_count == 1
-    assert first.bbox == service.BRAZIL_BBOX
+    assert HydroFeatureCollection.model_validate_json(first.body).bbox == service.BRAZIL_BBOX
     await service.warm_up()
     assert bodies.call_count == 1
     service._cache.clear()
@@ -216,3 +216,16 @@ async def test_ana_batches_run_in_parallel_and_keep_order() -> None:
 
     assert [feature["id"] for feature in features] == [str(i) for i in range(600)]
     assert peak == 3
+
+
+async def test_route_serves_cached_json_in_camel_case_with_http_cache(monkeypatch) -> None:
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+
+    monkeypatch.setattr(service, "_fetch_water_bodies", AsyncMock(return_value=[]))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/api/v1/hydrography?zoom=4")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "public, max-age=3600"
+    assert response.json()["metadata"]["riverCount"] > 0

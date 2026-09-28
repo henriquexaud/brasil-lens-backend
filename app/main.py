@@ -62,7 +62,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.add_middleware(GZipMiddleware, minimum_size=1024)
+# O nível 9 (padrão) custa 4x mais CPU que o 6 num GeoJSON de 2 MB para ganhar menos de 1%.
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,

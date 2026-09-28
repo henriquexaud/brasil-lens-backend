@@ -21,6 +21,15 @@ class CamelModel(BaseModel):
     )
 
 
+def to_json(model: BaseModel) -> bytes:
+    """Corpo da resposta como a rota o serializaria, pronto para cache e reenvio.
+
+    Um GeoJSON guardado como modelo ocupa ~9x mais memória que o JSON e é revalidado e
+    serializado de novo a cada resposta.
+    """
+    return model.model_dump_json(by_alias=True).encode()
+
+
 class ErrorDetail(CamelModel):
     code: str
     message: str

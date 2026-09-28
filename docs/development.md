@@ -29,3 +29,18 @@ Instalação e variáveis de ambiente: [README](../README.md), `.env.example` e 
 - **Rota nova:** `api/v1/<domínio>.py` fina → service → schema `CamelModel` → `router.py` → atualizar `frontend/src/api/types.ts` e o doc do domínio.
 - **Schema:** uma migration nova, sem editar as existentes. Preserve `ibge_code`, `parent_id` e os LODs.
 - **Job agendado:** registrar em `weather_scheduler._JOBS`, usar `_runner.job_session`; se o frescor aparece na interface, incluir em `services/weather._SOURCE_DEFINITIONS`.
+
+## Deploy
+
+Frontend na Vercel, API no Render e banco no Neon, todos no plano grátis ([ADR-09](decisions.md)).
+
+1. **Neon:** projeto Postgres 17 na região AWS `us-east-1`, a mesma do Render. No 17 o Neon traz PostGIS 3.5; no 16, a 3.3, mais antiga que a do Compose (3.4). Use a connection string direta, sem `-pooler` no host: com uma instância e até 10 conexões, o pooler não é necessário. Cole a URL como o Neon a entrega; `core/config.py` troca o driver para asyncpg e `sslmode` por `ssl`.
+2. **Ingestão**, uma vez, da sua máquina (o Render tem 0,1 de CPU): `docker run --rm -e DATABASE_URL='<url do Neon>' brasil-lens-api sh -c "alembic upgrade head && python -m app.jobs.bootstrap"`.
+3. **Render:** New → Blueprint com este repositório (`render.yaml`). Preencha `DATABASE_URL` e `CORS_ORIGINS` (a URL da Vercel, sem barra no fim). A imagem roda as migrations ao subir e escuta em `$PORT`. Sem `REDIS_URL`: com uma instância, o cache em memória basta.
+4. **Vercel:** importe o repositório do frontend (preset Vite) com `VITE_API_BASE_URL=https://<serviço>.onrender.com/api/v1`. O valor é fixado no build; se mudar, faça redeploy.
+
+Limites que moldam o uso:
+- O Render dorme após 15 min sem tráfego e leva ~1 min para acordar. O agendador de alertas para junto e roda assim que a API acorda; os alertas do CEMADEN expiram sozinhos (invariante 10).
+- Não use pinger para manter o Render acordado: o agendador consultaria o banco a cada 10 min e esgotaria as 100 CU-h/mês do Neon, que dorme após 5 min sem consultas. O health check do Render usa `/health`, que não toca o banco.
+- A instância tem 512 MB. Medido com todas as malhas municipais em cache, o processo fica em ~150 MB, porque os caches de GeoJSON guardam JSON pronto ([architecture](architecture.md)).
+- O Neon tem 0,5 GB (o banco ocupa ~80 MB) e 5 GB/mês de egress; o cache do `/map` evita reler as malhas.

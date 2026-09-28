@@ -1,0 +1,22 @@
+# Blueprint do Render: a API no plano grátis. Passo a passo em docs/development.md#deploy.
+services:
+  - type: web
+    name: brasil-lens-api
+    runtime: docker
+    plan: free
+    # Mesma região do banco no Neon (AWS us-east-1): a API faz várias consultas por resposta.
+    region: virginia
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    # /health não toca o banco, para a checagem não manter o Neon acordado.
+    healthCheckPath: /api/v1/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: APP_ENV
+        value: production
+      - key: LOG_FORMAT
+        value: json

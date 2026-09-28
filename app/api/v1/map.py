@@ -42,7 +42,6 @@ def _conditional(request: Request, etag: str) -> tuple[dict[str, str], bool]:
 )
 async def get_map(
     request: Request,
-    response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
     level: Annotated[
         TerritoryLevel,
@@ -58,7 +57,7 @@ async def get_map(
             )
         ),
     ] = None,
-) -> MapFeatureCollection | Response:
+) -> Response:
     version = await map_service.data_version(session)
     geometry_lod = lod.to_geometry_lod() if lod else None
     key = map_service.projection_key(
@@ -70,12 +69,11 @@ async def get_map(
     headers, not_modified = _conditional(request, f'W/"map:{key}"')
     if not_modified:
         return Response(status_code=304, headers=headers)
-    collection = await map_service.get_map(
+    body = await map_service.get_map_json(
         session,
         level=level,
         parent_code=parent,
         lod=geometry_lod,
         version=version,
     )
-    response.headers.update(headers)
-    return collection
+    return Response(body, media_type="application/json", headers=headers)

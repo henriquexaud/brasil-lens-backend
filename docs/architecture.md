@@ -19,6 +19,8 @@ O navegador fala com a API pelo nginx (`/api/v1`). A API, em FastAPI, usa PostGI
 
 Camadas do backend, com dependência em um só sentido: `api/v1` → `services` → `repositories` (SQL/PostGIS) | `providers` (HTTP e normalização). Apoio: `schemas` (contratos), `jobs` (ingestão e agendador), `core` (config, erros, cache, cooldown). O `lifespan` de `main.py` inicia o agendador de alertas (a cada 10 min) e aquece as áreas municipais e a hidrografia.
 
+Em produção, o frontend fica na Vercel, a API no Render e o banco no Neon, sem Redis; sem o nginx, o navegador chama a API pela URL absoluta, liberada em `CORS_ORIGINS` ([ADR-09](decisions.md); passo a passo em [development](development.md#deploy)).
+
 Onde fica o estado: PostGIS guarda território, alertas, municípios acompanhados e proveniência; Redis guarda derivados compartilhados; a memória do processo guarda caches TTL, cooldowns e requisições em voo; o navegador guarda o cache do TanStack Query e o `sessionStorage`.
 
 ## Contrato HTTP
@@ -32,6 +34,8 @@ Onde fica o estado: PostGIS guarda território, alertas, municípios acompanhado
 ## Cache e degradação
 
 - Duas camadas: `core/cache.TTLCache` (memória, por processo) e `core/redis_cache` (opcional; payload zlib, chave `brasil-lens:v4:<namespace>:<sha256>`). Falha do Redis é tratada como miss e pausa o uso dele por 30 s.
+- GeoJSON pesado (`/map`, `/hydrography`) fica em memória como o JSON pronto da resposta (`schemas/common.to_json`), e a rota devolve um `Response` direto. Como modelo, 128 áreas de hidrografia ocupavam ~375 MB (~43 MB em JSON) e cada acerto revalidava e serializava tudo de novo. O `response_model` continua declarado para o Swagger, e o schema continua sendo o contrato.
+- O gzip usa nível 6: o 9, padrão do Starlette, custa 4x mais CPU num GeoJSON de 2 MB para ganhar menos de 1%.
 - Todo derivado da geografia leva `data_version` (a última ingestão territorial) na chave; uma nova ingestão invalida tudo sem varredura.
 - Cada fonte tem um `SourceCooldown` (60 s). O fallback tem limite de idade e sai marcado. Buscas em voo são compartilhadas por chave (dedup e locks).
 - Ao mudar um cache: payload incompatível pede namespace novo (ex.: `weather-reading-v2`); mudança de frescor precisa ser feita também no frontend. Os TTLs de cada domínio estão no doc do domínio e no código.

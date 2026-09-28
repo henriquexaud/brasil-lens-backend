@@ -11,6 +11,7 @@ from app.core.logging import get_logger
 from app.models import EXPECTED_PARENT_LEVEL, REQUIRES_PARENT, GeometryLOD, TerritoryLevel
 from app.repositories import map_projection as map_repo
 from app.repositories import territories as territories_repo
+from app.schemas.common import to_json
 from app.schemas.map import (
     MapFeature,
     MapFeatureCollection,
@@ -27,7 +28,8 @@ _DEFAULT_LOD: dict[TerritoryLevel, GeometryLOD] = {
     TerritoryLevel.MUNICIPALITY: GeometryLOD.DETAIL,
 }
 
-_cache: TTLCache[MapFeatureCollection] = TTLCache(
+# JSON pronto: a malha municipal de todas as UFs soma ~17 MB, então cabe inteira no cache.
+_cache: TTLCache[bytes] = TTLCache(
     ttl_seconds=settings.read_cache_ttl_seconds,
     max_entries=settings.read_cache_max_entries,
 )
@@ -63,14 +65,14 @@ def projection_key(
     )
 
 
-async def get_map(
+async def get_map_json(
     session: AsyncSession,
     *,
     level: TerritoryLevel,
     parent_code: str | None = None,
     lod: GeometryLOD | None = None,
     version: int | None = None,
-) -> MapFeatureCollection:
+) -> bytes:
     effective_lod = lod or _DEFAULT_LOD[level]
     _validate_scope(level, parent_code)
 
@@ -88,9 +90,9 @@ async def get_map(
 
     cached_redis = await redis_cache.read("map-projection", redis_key, MapFeatureCollection)
     if cached_redis is not None:
-        if len(cached_redis.features) <= settings.read_cache_max_features:
-            _cache.set(redis_key, cached_redis)
-        return cached_redis
+        body = to_json(cached_redis)
+        _cache.set(redis_key, body)
+        return body
 
     parent_id = await _resolve_parent(session, level, parent_code)
 
@@ -156,10 +158,10 @@ async def get_map(
         },
     )
 
-    if len(features) <= settings.read_cache_max_features:
-        _cache.set(redis_key, response)
+    body = to_json(response)
+    _cache.set(redis_key, body)
     await redis_cache.write("map-projection", redis_key, response, 86400)
-    return response
+    return body
 
 
 def _scope_bbox(

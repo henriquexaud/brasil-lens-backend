@@ -60,7 +60,6 @@ services:
       LOG_FORMAT: ${LOG_FORMAT:-console}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
       READ_CACHE_TTL_SECONDS: ${READ_CACHE_TTL_SECONDS:-300}
-      READ_CACHE_MAX_FEATURES: ${READ_CACHE_MAX_FEATURES:-200}
       HTTP_CACHE_MAX_AGE: ${HTTP_CACHE_MAX_AGE:-300}
       INPE_QUEIMADAS_WFS_URL: ${INPE_QUEIMADAS_WFS_URL:-https://data.inpe.br/queimadas/geoserver/wfs}
       INPE_QUEIMADAS_WMS_URL: ${INPE_QUEIMADAS_WMS_URL:-https://data.inpe.br/queimadas/geoserver/wms}

@@ -17,7 +17,6 @@ router = APIRouter(prefix="/hydrography", tags=["hydrography"])
     response_model_exclude_none=False,
 )
 async def get_hydrography(
-    response: Response,
     zoom: Annotated[
         float,
         Query(ge=3, le=12, description="Zoom do mapa; define o detalhe dos rios e lagos."),
@@ -26,14 +25,17 @@ async def get_hydrography(
         str | None,
         Query(description="Área 'oeste,sul,leste,norte'; ignorada abaixo do zoom 6."),
     ] = None,
-) -> HydroFeatureCollection:
-    collection = await hydrography_service.get_hydrography(
+) -> Response:
+    hydro = await hydrography_service.get_hydrography(
         zoom=zoom, bbox=parse_bbox(bbox) if bbox else None
     )
     max_age = (
         settings.map_http_cache_max_age
-        if collection.metadata.status == "ok"
+        if hydro.status == "ok"
         else hydrography_service.PARTIAL_CACHE_SECONDS
     )
-    response.headers["Cache-Control"] = f"public, max-age={max_age}"
-    return collection
+    return Response(
+        hydro.body,
+        media_type="application/json",
+        headers={"Cache-Control": f"public, max-age={max_age}"},
+    )

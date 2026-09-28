@@ -3,6 +3,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+from sqlalchemy.engine import make_url
 
 
 class Settings(BaseSettings):
@@ -25,7 +26,6 @@ class Settings(BaseSettings):
     redis_cache_prefix: str = "brasil-lens:v4"
     read_cache_ttl_seconds: int = 300
     read_cache_max_entries: int = 64
-    read_cache_max_features: int = 200
     http_cache_max_age: int = 300
     map_http_cache_max_age: int = 3600
     map_http_stale_while_revalidate: int = 86400
@@ -58,6 +58,22 @@ class Settings(BaseSettings):
     geometry_detail_tolerance: float = 0.001
 
     api_v1_prefix: str = Field(default="/api/v1")
+
+    @field_validator("database_url")
+    @classmethod
+    def _asyncpg_url(cls, value: str) -> str:
+        # Aceita a URL como o Neon e o Render a entregam (`postgresql://...?sslmode=require
+        # &channel_binding=require`); o asyncpg não conhece `sslmode` nem `channel_binding`.
+        url = make_url(value)
+        if not url.drivername.startswith(("postgres", "postgresql")):
+            return value
+        query = dict(url.query)
+        sslmode = query.pop("sslmode", None)
+        query.pop("channel_binding", None)
+        if sslmode and "ssl" not in query:
+            query["ssl"] = sslmode
+        url = url.set(drivername="postgresql+asyncpg", query=query)
+        return url.render_as_string(hide_password=False)
 
     @field_validator("cors_origins", mode="before")
     @classmethod

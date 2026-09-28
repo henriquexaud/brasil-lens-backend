@@ -19,7 +19,7 @@ docker compose run --rm api python -m app.jobs.bootstrap   # ingestão do IBGE, 
 
 ## Configuração
 
-Funciona sem `.env`. Para personalizar, copie `.env.example`. As variáveis mais usadas: portas (`API_PORT`, `WEB_PORT`, `POSTGRES_PORT`), `FRONTEND_CONTEXT` (use `../frontend` para um clone local), `VITE_API_BASE_URL` (exige rebuild), `CORS_ORIGINS` e `WEATHER_REFRESH_ENABLED`. A lista completa está em `app/core/config.py`.
+Funciona sem `.env`. Para personalizar, copie `.env.example`. As variáveis mais usadas: portas (`API_PORT`, `WEB_PORT`, `POSTGRES_PORT`), `FRONTEND_CONTEXT` (use `../frontend` para um clone local), `VITE_API_BASE_URL` (exige rebuild), `CORS_ORIGINS` e `WEATHER_REFRESH_ENABLED`. A lista completa está em `app/core/config.py`. Deploy grátis (Vercel + Render + Neon): [docs/development.md](docs/development.md#deploy).
 
 ## Documentação
 

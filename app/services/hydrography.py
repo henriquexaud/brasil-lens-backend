@@ -5,7 +5,7 @@ import json
 from collections.abc import Coroutine
 from itertools import pairwise
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, NamedTuple
 from weakref import WeakValueDictionary
 
 import httpx
@@ -14,6 +14,7 @@ from app.core import redis_cache
 from app.core.cache import TTLCache
 from app.core.cooldown import SourceCooldown
 from app.core.logging import get_logger
+from app.schemas.common import to_json
 from app.schemas.hydrography import (
     HydroFeature,
     HydroFeatureCollection,
@@ -30,8 +31,16 @@ ANA_WATER_BODIES_URL = (
 
 BRAZIL_BBOX: tuple[float, float, float, float] = (-73.99, -33.75, -28.84, 5.27)
 
+
+class HydroResponse(NamedTuple):
+    """JSON pronto da resposta: 128 áreas ocupavam ~375 MB como modelo e ~43 MB assim."""
+
+    body: bytes
+    status: Literal["ok", "partial"]
+
+
 CACHE_TTL_SECONDS = 86400
-_cache: TTLCache[HydroFeatureCollection] = TTLCache(CACHE_TTL_SECONDS, max_entries=128)
+_cache: TTLCache[HydroResponse] = TTLCache(CACHE_TTL_SECONDS, max_entries=128)
 _locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 ana_cooldown = SourceCooldown("ana", 60)
 PARTIAL_CACHE_SECONDS = 60
@@ -412,7 +421,7 @@ async def _or_none(fetch: Coroutine[Any, Any, list[HydroFeature]]) -> list[Hydro
 
 async def get_hydrography(
     *, zoom: float = 4, bbox: tuple[float, float, float, float] | None = None
-) -> HydroFeatureCollection:
+) -> HydroResponse:
     drainage, _, tolerance = hydro_detail(zoom)
     area = bbox if zoom >= 6 and bbox else BRAZIL_BBOX
     key = f"{drainage}:{area}"
@@ -421,8 +430,9 @@ async def get_hydrography(
         cached = _cache.get(key)
         if cached is not None:
             return cached
-        cached = await redis_cache.read("hydrography", key, HydroFeatureCollection)
-        if cached is not None:
+        stored = await redis_cache.read("hydrography", key, HydroFeatureCollection)
+        if stored is not None:
+            cached = HydroResponse(to_json(stored), stored.metadata.status)
             _cache.set(key, cached, ttl_seconds=30)
             return cached
         snapshot = [
@@ -459,12 +469,13 @@ async def get_hydrography(
             bbox=area,
             features=visible + bodies,
         )
+        response = HydroResponse(to_json(result), result.metadata.status)
         if partial:
-            _cache.set(key, result, ttl_seconds=PARTIAL_CACHE_SECONDS)
+            _cache.set(key, response, ttl_seconds=PARTIAL_CACHE_SECONDS)
         else:
-            _cache.set(key, result)
+            _cache.set(key, response)
             await redis_cache.write("hydrography", key, result, CACHE_TTL_SECONDS)
-        return result
+        return response
 
 
 async def warm_up() -> None:
