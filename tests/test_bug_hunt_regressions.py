@@ -79,6 +79,7 @@ def test_search_wildcards_are_escaped() -> None:
 
 
 @pytest.mark.db
+@pytest.mark.ingested
 async def test_percent_search_matches_nothing(session: AsyncSession) -> None:
     rows = await territories_repo.list_territories(
         session, level=TerritoryLevel.MUNICIPALITY, search="%%"

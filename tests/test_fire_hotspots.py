@@ -269,3 +269,63 @@ async def test_inpe_outage_pauses_every_scope_and_says_when_it_retries() -> None
             at=datetime.now(UTC),
         )
     assert upstream.call_count == 1
+
+
+async def test_summary_and_identify_routes_forward_the_scope_and_identify_is_cacheable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.api.deps import get_session
+    from app.main import app
+    from app.schemas.fire_hotspots import FireSummary
+    from app.services import fire_summary
+
+    at = datetime(2026, 9, 20, 12, tzinfo=UTC)
+    summary = AsyncMock(
+        return_value=FireSummary(
+            window_start=at - timedelta(hours=24),
+            window_end=at,
+            hours=24,
+            total=0,
+            municipalities=[],
+        )
+    )
+    identify = AsyncMock(
+        return_value={"type": "FeatureCollection", "features": [], "matchedCount": 0}
+    )
+    monkeypatch.setattr(fire_summary, "get_summary", summary)
+    monkeypatch.setattr(service, "identify_fire_hotspots", identify)
+
+    async def no_session():
+        yield None
+
+    app.dependency_overrides[get_session] = no_session
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            summary_response = await client.get(
+                "/api/v1/fire-hotspots/summary",
+                params={"at": at.isoformat(), "level": "state", "parent": "35", "hours": 24},
+            )
+            identify_response = await client.get(
+                "/api/v1/fire-hotspots/identify",
+                params={
+                    "latitude": -23.5,
+                    "longitude": -46.6,
+                    "tolerance": 0.1,
+                    "at": at.isoformat(),
+                    "parent": "3550308",
+                    "level": "municipality",
+                },
+            )
+            missing_at = await client.get("/api/v1/fire-hotspots/summary")
+    finally:
+        app.dependency_overrides.pop(get_session, None)
+
+    assert summary_response.status_code == 200
+    assert summary.await_args.kwargs == {"level": "state", "parent": "35", "hours": 24, "at": at}
+    assert identify_response.status_code == 200
+    assert identify_response.headers["cache-control"] == "public, max-age=120"
+    assert identify.await_args.kwargs["parent_code"] == "3550308"
+    assert identify.await_args.kwargs["at"] == at
+    assert missing_at.status_code == 422, "o resumo exige `at`: nunca assume Date.now() do servidor"

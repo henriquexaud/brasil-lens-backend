@@ -13,7 +13,7 @@ from app.models import GeometryLOD, TerritoryLevel
 from app.schemas.map import MapFeatureCollection, MapLod
 from app.services import map as map_service
 
-pytestmark = pytest.mark.db
+pytestmark = [pytest.mark.db, pytest.mark.ingested]
 
 
 @pytest.fixture(autouse=True)
@@ -44,16 +44,7 @@ async def _map(
     return MapFeatureCollection.model_validate_json(body)
 
 
-async def _require_ingested_data(session: AsyncSession) -> None:
-    states = (
-        await session.execute(text("SELECT COUNT(*) FROM territories WHERE level = 'state'"))
-    ).scalar_one()
-    if states == 0:
-        pytest.skip("Banco sem dados. Rode 'make ingest' antes dos testes de integração.")
-
-
 async def test_mapa_inicial_carrega_ufs_com_geometria_simplificada(session: AsyncSession) -> None:
-    await _require_ingested_data(session)
     collection = await _map(session, level=TerritoryLevel.STATE)
     assert collection.type == "FeatureCollection"
     assert collection.scope.count == 27
@@ -63,7 +54,6 @@ async def test_mapa_inicial_carrega_ufs_com_geometria_simplificada(session: Asyn
 
 
 async def test_mapa_municipal_carrega_apenas_o_estado_escolhido(session: AsyncSession) -> None:
-    await _require_ingested_data(session)
     collection = await _map(session, level=TerritoryLevel.MUNICIPALITY, parent_code="35")
     assert collection.scope.lod is GeometryLOD.DETAIL
     assert collection.scope.count == 645
@@ -71,25 +61,21 @@ async def test_mapa_municipal_carrega_apenas_o_estado_escolhido(session: AsyncSe
 
 
 async def test_nivel_municipal_exige_pai(session: AsyncSession) -> None:
-    await _require_ingested_data(session)
     with pytest.raises(InvalidParameterError):
         await _map(session, level=TerritoryLevel.MUNICIPALITY)
 
 
 async def test_pai_de_nivel_incompativel_e_recusado(session: AsyncSession) -> None:
-    await _require_ingested_data(session)
     with pytest.raises(InvalidParameterError):
         await _map(session, level=TerritoryLevel.MUNICIPALITY, parent_code="3")
 
 
 async def test_pai_inexistente_resulta_em_404(session: AsyncSession) -> None:
-    await _require_ingested_data(session)
     with pytest.raises(TerritoryNotFoundError):
         await _map(session, level=TerritoryLevel.MUNICIPALITY, parent_code="99")
 
 
 async def test_bbox_do_escopo_e_usado_no_enquadramento(session: AsyncSession) -> None:
-    await _require_ingested_data(session)
     collection = await _map(session, level=TerritoryLevel.STATE)
     assert collection.bbox is not None
     west, south, east, north = collection.bbox
@@ -99,7 +85,6 @@ async def test_bbox_do_escopo_e_usado_no_enquadramento(session: AsyncSession) ->
 
 
 async def test_pais_nao_aceita_pai(session: AsyncSession) -> None:
-    await _require_ingested_data(session)
     with pytest.raises(InvalidParameterError):
         await _map(session, level=TerritoryLevel.COUNTRY, parent_code="35")
     root = await _map(session, level=TerritoryLevel.COUNTRY)
@@ -119,7 +104,6 @@ def test_lod_publico_nao_expoe_geometria_canonica() -> None:
 async def test_geometrias_simplificadas_sao_menores_que_canonicas(
     session: AsyncSession,
 ) -> None:
-    await _require_ingested_data(session)
     rows = await session.execute(
         text(
             """SELECT lod::text AS lod, SUM(vertex_count) AS vertices
@@ -135,7 +119,6 @@ async def test_geometrias_simplificadas_sao_menores_que_canonicas(
 async def test_malha_municipal_fica_no_cache_em_processo_como_json(
     session: AsyncSession,
 ) -> None:
-    await _require_ingested_data(session)
     first = await map_service.get_map_json(
         session, level=TerritoryLevel.MUNICIPALITY, parent_code="35"
     )
@@ -147,7 +130,6 @@ async def test_malha_municipal_fica_no_cache_em_processo_como_json(
 
 
 async def test_projecao_de_ufs_reutiliza_cache(session: AsyncSession) -> None:
-    await _require_ingested_data(session)
     first = await map_service.get_map_json(session, level=TerritoryLevel.STATE)
     second = await map_service.get_map_json(session, level=TerritoryLevel.STATE)
     assert first is second
@@ -155,7 +137,6 @@ async def test_projecao_de_ufs_reutiliza_cache(session: AsyncSession) -> None:
 
 
 async def test_etag_revalida_a_malha_sem_recalcular(session: AsyncSession) -> None:
-    await _require_ingested_data(session)
     async with _api(session) as client:
         first = await client.get("/api/v1/map?level=state")
         assert first.status_code == 200

@@ -36,7 +36,7 @@ def anyio_backend() -> str:
 
 
 @pytest_asyncio.fixture
-async def session() -> AsyncIterator[AsyncSession]:
+async def session(request: pytest.FixtureRequest) -> AsyncIterator[AsyncSession]:
     engine = create_async_engine(settings.database_url, poolclass=None)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     try:
@@ -47,6 +47,14 @@ async def session() -> AsyncIterator[AsyncSession]:
                 await db_session.execute(text("SELECT 1"))
             except Exception as exc:
                 pytest.skip(f"PostgreSQL/PostGIS indisponível ({exc}). Rode 'make up' antes.")
+            if request.node.get_closest_marker("ingested"):
+                municipalities = (
+                    await db_session.execute(
+                        text("SELECT COUNT(*) FROM territories WHERE level = 'municipality'")
+                    )
+                ).scalar_one()
+                if municipalities == 0:
+                    pytest.skip("Banco sem dados. Rode 'make ingest' antes dos testes.")
             yield db_session
     finally:
         await engine.dispose()

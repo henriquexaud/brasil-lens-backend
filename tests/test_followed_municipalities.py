@@ -6,7 +6,6 @@ from contextlib import asynccontextmanager
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,7 +17,7 @@ from app.core.errors import (
 from app.models import FollowedMunicipality
 from app.services import followed_municipalities as service
 
-pytestmark = pytest.mark.db
+pytestmark = [pytest.mark.db, pytest.mark.ingested]
 
 SAO_PAULO = "3550308"
 BRASILIA = "5300108"
@@ -26,17 +25,6 @@ BRASILIA = "5300108"
 
 def _user() -> str:
     return f"test-{uuid.uuid4().hex[:12]}"
-
-
-async def _require_municipalities(session: AsyncSession) -> None:
-    found = (
-        await session.execute(
-            text("SELECT COUNT(*) FROM territories WHERE ibge_code IN (:a, :b)"),
-            {"a": SAO_PAULO, "b": BRASILIA},
-        )
-    ).scalar_one()
-    if found < 2:
-        pytest.skip("Territórios não ingeridos. Rode 'make bootstrap' antes.")
 
 
 @asynccontextmanager
@@ -65,7 +53,6 @@ async def _api(session: AsyncSession, user_id: str) -> AsyncIterator[AsyncClient
 
 
 async def test_follow_list_unfollow_round_trip(session: AsyncSession) -> None:
-    await _require_municipalities(session)
     user = _user()
 
     followed, created = await service.follow(session, user, SAO_PAULO)
@@ -89,7 +76,6 @@ async def test_follow_list_unfollow_round_trip(session: AsyncSession) -> None:
 
 
 async def test_follow_is_idempotent_and_per_user(session: AsyncSession) -> None:
-    await _require_municipalities(session)
     alice, bob = _user(), _user()
 
     _, first = await service.follow(session, alice, SAO_PAULO)
@@ -114,7 +100,6 @@ async def test_database_refuses_a_duplicate_follow(session: AsyncSession) -> Non
 
 
 async def test_only_existing_municipalities_can_be_followed(session: AsyncSession) -> None:
-    await _require_municipalities(session)
     user = _user()
     with pytest.raises(TerritoryNotFoundError):
         await service.follow(session, user, "9999999")
@@ -124,7 +109,6 @@ async def test_only_existing_municipalities_can_be_followed(session: AsyncSessio
 
 
 async def test_set_notifications_toggles_and_requires_a_follow(session: AsyncSession) -> None:
-    await _require_municipalities(session)
     user = _user()
 
     with pytest.raises(FollowedMunicipalityNotFoundError):
@@ -141,7 +125,6 @@ async def test_set_notifications_toggles_and_requires_a_follow(session: AsyncSes
 
 
 async def test_http_contract(session: AsyncSession) -> None:
-    await _require_municipalities(session)
     base = "/api/v1/me/followed-municipalities"
     async with _api(session, _user()) as client:
         empty = await client.get(base)

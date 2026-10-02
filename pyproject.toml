@@ -69,5 +69,8 @@ testpaths = ["tests"]
 # O código é montado em /app (WORKDIR) e não instalado como pacote no
 # container de desenvolvimento; sem isto o pytest não encontra `app`.
 pythonpath = ["."]
-markers = ["db: exige PostgreSQL/PostGIS disponível"]
+markers = [
+    "db: exige PostgreSQL/PostGIS disponível",
+    "ingested: exige o banco com a ingestão do IBGE (pula se estiver vazio)",
+]
 filterwarnings = ["error::DeprecationWarning:app.*"]

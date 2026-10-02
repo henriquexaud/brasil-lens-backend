@@ -497,6 +497,7 @@ def test_cell_size_follows_zoom_and_visible_extent() -> None:
 
 
 @pytest.mark.db
+@pytest.mark.ingested
 async def test_weather_state_uses_its_capital(session, monkeypatch: pytest.MonkeyPatch) -> None:
     fetch = fake_fetch()
     monkeypatch.setattr(service, "fetch_locations", fetch)
@@ -509,6 +510,7 @@ async def test_weather_state_uses_its_capital(session, monkeypatch: pytest.Monke
 
 
 @pytest.mark.db
+@pytest.mark.ingested
 async def test_weather_municipality_uses_local_geometry(
     session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -525,6 +527,7 @@ async def test_weather_municipality_uses_local_geometry(
 
 
 @pytest.mark.db
+@pytest.mark.ingested
 async def test_batches_are_paginated_and_seed_the_selection(
     session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -547,6 +550,7 @@ async def test_batches_are_paginated_and_seed_the_selection(
 
 
 @pytest.mark.db
+@pytest.mark.ingested
 async def test_state_sample_is_reused_by_the_close_view(
     session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -674,6 +678,7 @@ async def test_brazil_state_falls_back_to_its_capital_while_the_source_fails(
 
 
 @pytest.mark.db
+@pytest.mark.ingested
 async def test_brazil_map_measures_every_state_reusing_the_capitals(
     session, monkeypatch: pytest.MonkeyPatch
 ) -> None:

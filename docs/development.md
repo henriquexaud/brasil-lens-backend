@@ -17,7 +17,7 @@ Instalação e variáveis de ambiente: [README](../README.md), `.env.example` e 
 ## Testes
 
 - **Sem rede:** use `respx` ou fixtures reais em `tests/fixtures/` (`load_fixture`).
-- **PostGIS:** marque com `pytest.mark.db`; a fixture `session` faz rollback. Rotas com banco sobrescrevem `get_session` com a sessão do teste; o modelo é `_api()` em `test_map_queries.py`.
+- **PostGIS:** marque com `pytest.mark.db`; a fixture `session` faz rollback. Teste que lê território ingerido (UFs, municípios) também leva `pytest.mark.ingested`: com o banco vazio ele **pula** com a mensagem "Banco sem dados", em vez de falhar ou, pior, passar vazio. Sem banco nenhum a `session` pula tudo que é `db`. Pulado não é verde: confira o número de `skipped` e rode com `-rs` antes de dar a suíte como validada. Rotas com banco sobrescrevem `get_session` com a sessão do teste; o modelo é `_api()` em `test_map_queries.py`.
 - `conftest.py` desliga o Redis e zera os cooldowns em todo teste. Services com estado global expõem `reset_state()`/`clear_cache()`.
 - O nome do teste descreve o comportamento (`test_outage_serves_last_reading_as_previous_data_and_pauses_the_source`). Regressão corrigida ganha teste.
 - Mudou um provider? Cubra o parser com fixture real, campo faltante (→ `null`) e formato inesperado (→ `ProviderError`). Mudou cache ou fallback? Cubra frescor, marcação `stale`/`partial` e o caminho sem Redis.

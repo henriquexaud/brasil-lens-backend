@@ -10,6 +10,7 @@ from app.repositories.boundaries import municipality_map
 
 
 @pytest.mark.db
+@pytest.mark.ingested
 async def test_canonical_pages_are_faithful_disjoint_and_prioritize_capital(session, monkeypatch):
     monkeypatch.setattr(redis_cache, "read", AsyncMock(return_value=None))
     monkeypatch.setattr(redis_cache, "write", AsyncMock())
@@ -38,6 +39,7 @@ async def test_canonical_pages_are_faithful_disjoint_and_prioritize_capital(sess
 
 
 @pytest.mark.db
+@pytest.mark.ingested
 async def test_viewport_paginates_all_intersecting_municipalities(session, monkeypatch):
     monkeypatch.setattr(redis_cache, "read", AsyncMock(return_value=None))
     monkeypatch.setattr(redis_cache, "write", AsyncMock())

@@ -14,7 +14,7 @@ Código: `providers/inmet/alerts.py`, `providers/cemaden/alerts.py`, `jobs/_weat
 
 ## INMET
 
-`GET {INMET_ALERTS_BASE_URL}/avisos/ativos`, lista `hoje`. Avisos `encerrado`, sem id, sem datas ou sem polígono são descartados. O polígono pode vir como string e é corrigido com `ST_MakeValid`. A validade é o próprio `data_fim`, então, se a fonte cai, os avisos gravados continuam valendo até lá. O parser não tem teste dedicado (lacuna).
+`GET {INMET_ALERTS_BASE_URL}/avisos/ativos`, lista `hoje`. Avisos `encerrado`, sem id, sem datas ou sem polígono são descartados. O polígono pode vir como string e é corrigido com `ST_MakeValid`. A validade é o próprio `data_fim`, então, se a fonte cai, os avisos gravados continuam valendo até lá. Testes: `test_providers_inmet.py`, com um payload montado a partir dos campos que o parser lê (não é uma captura real da API); se a fonte mudar o formato, refaça-o com uma resposta real. Severidade, categoria e status das fontes: `test_weather_sources.py`.
 
 Estações (`providers/inmet/stations.py`, job manual, `/weather/stations`): o agendador não roda esse job e o frontend não consome a rota. Integre ou remova antes de investir nelas.
 
