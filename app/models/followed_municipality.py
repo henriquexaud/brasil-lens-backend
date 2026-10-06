@@ -3,6 +3,7 @@ from __future__ import annotations
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    ForeignKey,
     Identity,
     Index,
     Integer,
@@ -20,7 +21,7 @@ class FollowedMunicipality(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, Identity(), primary_key=True)
 
-    user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     municipality_code: Mapped[str] = mapped_column(String(7), nullable=False)
     notifications_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=true()

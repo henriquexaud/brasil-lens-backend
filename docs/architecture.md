@@ -11,7 +11,7 @@ Princípios:
 4. **Cota respeitada:** amostrar e cachear antes de consultar a fonte.
 5. **Simplicidade:** nada construído "para o futuro".
 
-Limitações atuais: não há autenticação (tudo roda como o usuário `local`); a preferência de avisos é salva, mas nada é enviado; as estações do INMET não têm consumidor.
+Limitações atuais: a preferência de avisos é salva, mas nada é enviado; as estações do INMET não têm consumidor. A autenticação usa cadastro por e-mail e senha, sem confirmação de e-mail ou recuperação de senha.
 
 ## Componentes
 
@@ -19,17 +19,19 @@ O navegador fala com a API pelo nginx (`/api/v1`). A API, em FastAPI, usa PostGI
 
 Camadas do backend, com dependência em um só sentido: `api/v1` → `services` → `repositories` (SQL/PostGIS) | `providers` (HTTP e normalização). Apoio: `schemas` (contratos), `jobs` (ingestão e agendador), `core` (config, erros, cache, cooldown). O `lifespan` de `main.py` inicia o agendador de alertas (a cada 10 min) e aquece as áreas municipais e a hidrografia.
 
-Em produção, o frontend fica na Vercel, a API no Render e o banco no Neon, sem Redis; sem o nginx, o navegador chama a API pela URL absoluta, liberada em `CORS_ORIGINS`, e a API chama a Open-Meteo por um repasse na Vercel ([ADR-09](decisions.md), [ADR-10](decisions.md); passo a passo em [development](development.md#deploy)).
+Em produção, o frontend fica na Vercel, a API no Render e o banco no Neon, sem Redis. O navegador chama `/api/v1` no próprio domínio, repassado pelo rewrite da Vercel para o Render, para manter o cookie de sessão no mesmo site; em desenvolvimento, o Vite/nginx faz o proxy. `CORS_ORIGINS` libera as origens do frontend. A API chama a Open-Meteo por um repasse na Vercel ([ADR-09](decisions.md), [ADR-10](decisions.md), [ADR-11](decisions.md); passo a passo em [development](development.md#deploy)).
 
-Onde fica o estado: PostGIS guarda território, alertas, municípios acompanhados e proveniência; Redis guarda derivados compartilhados; a memória do processo guarda caches TTL, cooldowns e requisições em voo; o navegador guarda o cache do TanStack Query e o `sessionStorage`.
+Onde fica o estado: PostGIS guarda território, alertas, contas, sessões, tema por conta, municípios acompanhados e proveniência; Redis guarda derivados compartilhados; a memória do processo guarda caches TTL, cooldowns, limites de tentativas de acesso e requisições em voo; o navegador guarda o cache do TanStack Query, a última aparência local e o `sessionStorage` do mapa.
 
 ## Contrato HTTP
 
 - Rotas em `app/api/v1/router.py`; o contrato completo está no Swagger (`/docs`). JSON em camelCase (`CamelModel`), espelhado em `frontend/src/api/types.ts`.
-- Formato de erro: `{"error": {"code", "message", "details"}}`, com mensagem em pt-BR. Códigos: `invalid_parameter` 400, `not_found` 404, `conflict` 409, validação 422, `provider_error` 502, `provider_rate_limited` 503 (com `details.retryAfterSeconds`).
+- Formato de erro: `{"error": {"code", "message", "details"}}`, com mensagem em pt-BR. Códigos: `invalid_parameter` 400, `authentication_required` 401, `forbidden` 403, `not_found` 404, `conflict` 409, validação 422, `auth_rate_limited` 429, `provider_error` 502, `provider_rate_limited` 503 (com `details.retryAfterSeconds`).
 - O payload das fontes externas traz `status`: `ok`, `stale` (vindo do fallback) ou `partial`. Quem consome deve mostrar esse status.
 - `/map` responde com ETag e `max-age=3600, stale-while-revalidate=86400`; `/weather/alerts`, com ETag e `no-cache` (o polling de 90 s recebe `304` vazio enquanto nada muda); as demais rotas geográficas, com `max-age=300`; as de acompanhamento, com `no-store`. Nas rotas de clima, `force=true` busca de novo leituras com mais de 5 min.
-- Acompanhamento (`/me/followed-municipalities/{code}`): PUT responde 201 com `Location` na primeira vez e 200 se já seguia; DELETE responde 204; POST `.../notifications` liga ou desliga os avisos (404 se o município não é seguido). O usuário vem de `api/deps.get_current_user_id`, o único ponto a trocar quando houver autenticação.
+- Autenticação: POST `/auth/register` recebe `{name,email,password,theme?}` e responde 201; POST `/auth/login` recebe `{email,password}` e responde 200. Ambos retornam `{id,name,email,theme}` e criam o cookie `brasil_lens_session` (30 dias, HttpOnly, SameSite=Lax, Secure em produção). GET `/auth/me` recupera a conta ou responde 401; POST `/auth/logout` revoga a sessão e responde 204, mesmo sem sessão. PUT `/me/preferences` recebe `{theme:"light"|"dark"}` e retorna a conta atualizada. Respostas de autenticação/preferências levam `no-store`.
+- Escritas exigem `X-Brasil-Lens-Client: web` e, quando presente, `Origin` em `CORS_ORIGINS`, para impedir CSRF. CORS aceita credenciais só das origens configuradas. E-mails são normalizados (trim + minúsculas); senhas têm 8–128 caracteres no cadastro, sem trim. O hash usa scrypt (N=16384, r=8, p=5) com sal aleatório, fora do event loop. Sessões guardam só SHA-256 do token aleatório; expiram em 30 dias e registros expirados são removidos ao abrir uma sessão. Login/cadastro têm limite de 10 tentativas por e-mail em 5 min no processo; sucesso zera a contagem.
+- Acompanhamento (`/me/followed-municipalities/{code}`): PUT responde 201 com `Location` na primeira vez e 200 se já seguia; DELETE responde 204; POST `.../notifications` liga ou desliga os avisos (404 se o município não é seguido). `/me/*` exige sessão válida; o usuário vem apenas do cookie validado por `api/deps.get_current_user_id`, nunca do cliente. `followed_municipalities.user_id` tem FK para `users.id`. A migration preserva registros antigos em contas legadas sem credenciais, incluindo `local`, sem misturá-los a novos cadastros.
 
 ## Cache e degradação
 

@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Path, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user_id, get_session, get_write_session
+from app.api.deps import get_current_user_id, get_session, get_write_session, require_trusted_write
 from app.core.config import settings
 from app.schemas.followed_municipality import (
     FollowedMunicipalityListResponse,
@@ -12,7 +12,11 @@ from app.schemas.followed_municipality import (
 )
 from app.services import followed_municipalities as followed_service
 
-router = APIRouter(prefix="/me/followed-municipalities", tags=["followed-municipalities"])
+router = APIRouter(
+    prefix="/me/followed-municipalities",
+    tags=["followed-municipalities"],
+    dependencies=[Depends(require_trusted_write)],
+)
 
 UserId = Annotated[str, Depends(get_current_user_id)]
 MunicipalityCode = Annotated[

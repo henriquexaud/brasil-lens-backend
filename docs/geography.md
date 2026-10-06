@@ -10,6 +10,10 @@
 
 Código: `api/v1/map.py`, `territories.py` · `services/map.py`, `territories.py` · `repositories/territories.py`, `map_projection.py`, `boundaries.py`, `viewport.py`.
 
+## Contas e acompanhamento
+
+A migration `0010_user_accounts` cria `users` (nome, e-mail único normalizado, hash de senha e tema) e `user_sessions` (hash do token, FK da conta e validade). Acrescenta FK de `followed_municipalities.user_id` para `users.id`, mantendo a unicidade por conta/código IBGE. Os usuários legados, inclusive `local`, são preservados sem e-mail/senha e não podem entrar; seus municípios não são atribuídos automaticamente a novos cadastros. A malha e as migrations anteriores ficam inalteradas. Contrato e fluxo de acesso em [architecture](architecture.md).
+
 ## Ingestão IBGE
 
 `python -m app.jobs.bootstrap [--skip-municipal-geometries] [--states 35,31]` roda `import_territories` (Localidades v1) e depois `import_geometries` (Malhas v3; a municipal tem ~60 MB, timeout de 120 s e concorrência 4). É idempotente e grava `ingestion_runs`/`datasets`, que definem o `data_version`. As tolerâncias só mudam na próxima ingestão. Nenhuma requisição de usuário chama o IBGE.

@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.v1 import (
+    auth,
     fire_hotspots,
     followed_municipalities,
     health,
@@ -11,6 +12,7 @@ from app.api.v1 import (
 from app.api.v1 import map as map_routes
 
 api_router = APIRouter()
+api_router.include_router(auth.router)
 api_router.include_router(health.router)
 api_router.include_router(territories.router)
 api_router.include_router(map_routes.router)

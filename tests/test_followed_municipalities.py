@@ -14,7 +14,7 @@ from app.core.errors import (
     InvalidParameterError,
     TerritoryNotFoundError,
 )
-from app.models import FollowedMunicipality
+from app.models import FollowedMunicipality, User
 from app.services import followed_municipalities as service
 
 pytestmark = [pytest.mark.db, pytest.mark.ingested]
@@ -23,8 +23,11 @@ SAO_PAULO = "3550308"
 BRASILIA = "5300108"
 
 
-def _user() -> str:
-    return f"test-{uuid.uuid4().hex[:12]}"
+async def _user(session: AsyncSession) -> str:
+    user_id = f"test-{uuid.uuid4().hex[:12]}"
+    session.add(User(id=user_id, name="Conta de teste"))
+    await session.flush()
+    return user_id
 
 
 @asynccontextmanager
@@ -45,7 +48,11 @@ async def _api(session: AsyncSession, user_id: str) -> AsyncIterator[AsyncClient
     }
     app.dependency_overrides.update(overrides)
     try:
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+            headers={"X-Brasil-Lens-Client": "web"},
+        ) as client:
             yield client
     finally:
         for dependency in overrides:
@@ -53,7 +60,7 @@ async def _api(session: AsyncSession, user_id: str) -> AsyncIterator[AsyncClient
 
 
 async def test_follow_list_unfollow_round_trip(session: AsyncSession) -> None:
-    user = _user()
+    user = await _user(session)
 
     followed, created = await service.follow(session, user, SAO_PAULO)
     assert created
@@ -76,7 +83,7 @@ async def test_follow_list_unfollow_round_trip(session: AsyncSession) -> None:
 
 
 async def test_follow_is_idempotent_and_per_user(session: AsyncSession) -> None:
-    alice, bob = _user(), _user()
+    alice, bob = await _user(session), await _user(session)
 
     _, first = await service.follow(session, alice, SAO_PAULO)
     again, second = await service.follow(session, alice, SAO_PAULO)
@@ -90,7 +97,7 @@ async def test_follow_is_idempotent_and_per_user(session: AsyncSession) -> None:
 
 
 async def test_database_refuses_a_duplicate_follow(session: AsyncSession) -> None:
-    user = _user()
+    user = await _user(session)
     session.add(FollowedMunicipality(user_id=user, municipality_code=SAO_PAULO))
     await session.flush()
     session.add(FollowedMunicipality(user_id=user, municipality_code=SAO_PAULO))
@@ -100,7 +107,7 @@ async def test_database_refuses_a_duplicate_follow(session: AsyncSession) -> Non
 
 
 async def test_only_existing_municipalities_can_be_followed(session: AsyncSession) -> None:
-    user = _user()
+    user = await _user(session)
     with pytest.raises(TerritoryNotFoundError):
         await service.follow(session, user, "9999999")
     with pytest.raises(InvalidParameterError):
@@ -109,7 +116,7 @@ async def test_only_existing_municipalities_can_be_followed(session: AsyncSessio
 
 
 async def test_set_notifications_toggles_and_requires_a_follow(session: AsyncSession) -> None:
-    user = _user()
+    user = await _user(session)
 
     with pytest.raises(FollowedMunicipalityNotFoundError):
         await service.set_notifications(session, user, SAO_PAULO, False)
@@ -126,7 +133,7 @@ async def test_set_notifications_toggles_and_requires_a_follow(session: AsyncSes
 
 async def test_http_contract(session: AsyncSession) -> None:
     base = "/api/v1/me/followed-municipalities"
-    async with _api(session, _user()) as client:
+    async with _api(session, await _user(session)) as client:
         empty = await client.get(base)
         assert empty.status_code == 200
         assert empty.json() == {"municipalities": []}

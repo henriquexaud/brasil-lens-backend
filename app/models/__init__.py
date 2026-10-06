@@ -8,6 +8,7 @@ from app.models.territory import (
     TerritoryGeometry,
     TerritoryLevel,
 )
+from app.models.user import User, UserSession
 from app.models.weather import (
     WeatherAlert,
     WeatherObservation,
@@ -27,6 +28,8 @@ __all__ = [
     "Territory",
     "TerritoryGeometry",
     "TerritoryLevel",
+    "User",
+    "UserSession",
     "WeatherAlert",
     "WeatherObservation",
     "WeatherProvider",

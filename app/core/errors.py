@@ -41,6 +41,21 @@ class ConflictError(DomainError):
     code = "conflict"
 
 
+class AuthenticationError(DomainError):
+    status_code = 401
+    code = "authentication_required"
+
+
+class ForbiddenError(DomainError):
+    status_code = 403
+    code = "forbidden"
+
+
+class AuthRateLimitedError(DomainError):
+    status_code = 429
+    code = "auth_rate_limited"
+
+
 class InvalidParameterError(DomainError):
     status_code = 400
     code = "invalid_parameter"
