@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
@@ -9,8 +11,9 @@ from sqlalchemy import (
     Integer,
     String,
     UniqueConstraint,
-    true,
+    false,
 )
+from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin
@@ -24,8 +27,9 @@ class FollowedMunicipality(Base, TimestampMixin):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     municipality_code: Mapped[str] = mapped_column(String(7), nullable=False)
     notifications_enabled: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=true()
+        Boolean, nullable=False, server_default=false()
     )
+    notifications_opt_in_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
 
     __table_args__ = (
         UniqueConstraint("user_id", "municipality_code"),

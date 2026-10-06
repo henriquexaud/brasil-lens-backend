@@ -6,6 +6,7 @@ from app.api.v1 import (
     followed_municipalities,
     health,
     hydrography,
+    notifications,
     territories,
     weather,
 )
@@ -17,6 +18,7 @@ api_router.include_router(health.router)
 api_router.include_router(territories.router)
 api_router.include_router(map_routes.router)
 api_router.include_router(followed_municipalities.router)
+api_router.include_router(notifications.router)
 api_router.include_router(weather.router)
 api_router.include_router(hydrography.router)
 api_router.include_router(fire_hotspots.router)

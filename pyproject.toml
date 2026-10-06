@@ -15,6 +15,7 @@ dependencies = [
     "httpx==0.28.1",
     "orjson==3.10.13",
     "redis==6.4.0",
+    "pywebpush==2.5.0",
 ]
 
 [build-system]

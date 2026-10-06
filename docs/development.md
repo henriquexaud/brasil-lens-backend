@@ -50,6 +50,19 @@ Configuração: no Render, `DATABASE_URL`, `CORS_ORIGINS=https://brasil-lens.ver
 4. **Vercel**, na pasta do frontend: `vercel link --yes --project brasil-lens`, `printf '%s' "/api/v1" | vercel env add VITE_API_BASE_URL production --no-sensitive`, `vercel deploy --prod` e `vercel git connect`. O deploy automático exige o app da Vercel no GitHub com acesso ao repositório.
 5. **Repasse da Open-Meteo** ([ADR-10](decisions.md)): gere uma chave (`openssl rand -hex 32`), grave-a na Vercel (`vercel env add OPEN_METEO_RELAY_KEY production --sensitive < arquivo`, e o mesmo para `preview`) e no Render (painel → Environment), junto com `OPEN_METEO_URL`. Sem a chave, o repasse responde 401.
 
+### Notificações do PWA
+
+Web Push usa os serviços dos navegadores, sem domínio de e-mail, conta de remetente ou serviço pago. O cron usa os runners padrão gratuitos do repositório público no GitHub. No iOS/iPadOS, o usuário precisa adicionar o PWA à Tela de Início (16.4+); a permissão só aparece por um clique explícito, nunca no cadastro.
+
+1. Gere um par VAPID uma vez: `python -m app.jobs.generate_vapid_keys --output /private/tmp/brasil-lens-vapid.env`, com as dependências do projeto instaladas. O arquivo tem permissão 0600 e o comando não imprime a chave privada nem sobrescreve arquivo existente. Copie as chaves aos painéis de configuração; não inclua o arquivo no git. Preserve esse par: trocá-lo exige novas inscrições nos dispositivos.
+2. No Render, configure `VAPID_PUBLIC_KEY`. Essa chave pública é devolvida pela API ao app. O padrão `PUSH_NOTIFICATIONS_ENABLED=false` mantém o envio somente no cron; para enviar também com a API acordada, configure `VAPID_PRIVATE_KEY` e habilite essa flag. A chave privada nunca vai para a Vercel/bundle. `VAPID_SUBJECT` já usa a URL pública do Brasil Lens.
+3. Publique a migration `0011_notifications` pela API antes do frontend e do cron. No GitHub do backend, em Settings → Secrets and variables → Actions, adicione os Repository Secrets `DATABASE_URL` (mesmo Neon), `VAPID_PUBLIC_KEY` e `VAPID_PRIVATE_KEY`. O workflow “Notificações do PWA” roda aos minutos 17 e 47 e pode ser iniciado em Actions → Run workflow. Sem os três Secrets ele apenas informa o que falta. Um erro numa fonte não impede consultar a outra ou enviar avisos ainda vigentes. Não consulta Open-Meteo nem roda migrations.
+4. Publique o frontend. O usuário segue municípios, escolhe os sinos e autoriza o dispositivo. Permissão negada não ativa o sino. Os sinos antigos ficam desligados na migration e precisam ser reativados; os municípios continuam seguidos. “Desativar neste dispositivo” e Sair removem sua inscrição, preservando outros dispositivos da conta.
+
+O GitHub pode atrasar o cron e desativá-lo em repositórios públicos sem atividade por 60 dias; reative em Actions. Se o repositório ficar privado, confira a cota de runners antes de manter o cron. A rotina desperta o Neon a cada 30 min, sem manter o Render ou o banco permanentemente ativos; monitore a cota de compute já descrita abaixo. A periodicidade não garante aviso instantâneo, especialmente se um aviso durar menos que o intervalo entre consultas. `python -m app.jobs.dispatch_notifications` permite execução manual com as mesmas variáveis.
+
+Testes não enviam mensagens a dispositivos reais. Para conferir o envio real, use apenas um dispositivo/conta de teste do dono e um aviso real, após configurar as chaves. Regras de deduplicação, TTL e futuras integrações: [alerts](alerts.md#notificacoes-do-pwa).
+
 ### Operar
 
 - Logs: `render logs --resources srv-date5dugekts73affgeg --tail` e `vercel logs <url-do-deploy>`. Saúde: `curl https://brasil-lens-api.onrender.com/api/v1/health/ready`.
@@ -58,7 +71,7 @@ Configuração: no Render, `DATABASE_URL`, `CORS_ORIGINS=https://brasil-lens.ver
 
 ### Limites que moldam o uso
 
-- O Render dorme após 15 min sem tráfego e leva ~1 min para acordar. O agendador de alertas para junto e roda assim que a API acorda; os alertas do CEMADEN expiram sozinhos (invariante 10).
+- O Render dorme após 15 min sem tráfego e leva ~1 min para acordar. O agendador para junto e roda quando a API acorda; o cron de notificações ingere e envia mesmo com ela dormindo. Os alertas do CEMADEN expiram sozinhos (invariante 10).
 - Não use pinger para manter o Render acordado: o agendador consultaria o banco a cada 10 min e esgotaria as 100 CU-h/mês do Neon, que dorme após 5 min sem consultas. O health check do Render usa `/health`, que não toca o banco.
 - A instância tem 512 MB e 0,1 de CPU. Medido com todas as malhas municipais em cache, o processo fica em ~150 MB, porque os caches de GeoJSON guardam JSON pronto ([architecture](architecture.md)).
 - O Neon tem 0,5 GB (o banco ocupa ~80 MB) e 5 GB/mês de egress; o cache do `/map` evita reler as malhas.

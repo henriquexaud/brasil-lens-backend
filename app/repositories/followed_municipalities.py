@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Row, Select, delete, select, update
+from sqlalchemy import Row, Select, delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -90,7 +90,9 @@ async def set_notifications(session: AsyncSession, user_id: str, code: str, enab
             FollowedMunicipality.user_id == user_id,
             FollowedMunicipality.municipality_code == code,
         )
-        .values(notifications_enabled=enabled)
+        .values(
+            notifications_enabled=enabled, notifications_opt_in_at=func.now() if enabled else None
+        )
         .returning(FollowedMunicipality.id)
     )
     return (await session.execute(stmt)).scalar_one_or_none() is not None

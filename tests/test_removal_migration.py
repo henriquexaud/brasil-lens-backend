@@ -131,8 +131,8 @@ async def test_migration_removes_exclusive_data_and_preserves_shared_references(
         )
         await session.execute(
             text("""
-            INSERT INTO followed_municipalities (user_id, municipality_code)
-            VALUES ('migration-review', '9900001')
+            INSERT INTO followed_municipalities (user_id, municipality_code, notifications_enabled)
+            VALUES ('migration-review', '9900001', true)
         """)
         )
 

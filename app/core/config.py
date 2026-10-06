@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Annotated, Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from sqlalchemy.engine import make_url
 
@@ -53,6 +53,12 @@ class Settings(BaseSettings):
     weather_refresh_interval_seconds: int = 600
     weather_stations_cache_ttl_seconds: int = 90
     weather_alerts_cache_ttl_seconds: int = 90
+
+    push_notifications_enabled: bool = False
+    vapid_public_key: str = ""
+    vapid_private_key: SecretStr | None = None
+    vapid_subject: str = "https://brasil-lens.vercel.app"
+    notification_batch_limit: int = Field(default=500, ge=1, le=1000)
 
     inpe_queimadas_wfs_url: str = "https://data.inpe.br/queimadas/geoserver/wfs"
     inpe_queimadas_wms_url: str = "https://data.inpe.br/queimadas/geoserver/wms"

@@ -11,7 +11,7 @@ Princípios:
 4. **Cota respeitada:** amostrar e cachear antes de consultar a fonte.
 5. **Simplicidade:** nada construído "para o futuro".
 
-Limitações atuais: a preferência de avisos é salva, mas nada é enviado; as estações do INMET não têm consumidor. A autenticação usa cadastro por e-mail e senha, sem confirmação de e-mail ou recuperação de senha.
+Notificações do PWA usam Web Push, com permissão por dispositivo e autorização por município ([alertas](alerts.md)). Os eventos são separados do transporte para permitir outro canal futuramente. Não há envio por e-mail. Limitações atuais: as estações do INMET não têm consumidor; a autenticação usa cadastro por e-mail e senha, sem confirmação de e-mail ou recuperação de senha.
 
 ## Componentes
 
@@ -23,6 +23,8 @@ Em produção, o frontend fica na Vercel, a API no Render e o banco no Neon, sem
 
 Onde fica o estado: PostGIS guarda território, alertas, contas, sessões, tema por conta, municípios acompanhados e proveniência; Redis guarda derivados compartilhados; a memória do processo guarda caches TTL, cooldowns, limites de tentativas de acesso e requisições em voo; o navegador guarda o cache do TanStack Query, a última aparência local e o `sessionStorage` do mapa.
 
+O Postgres também guarda eventos de aviso, inscrições Web Push por conta e entregas por dispositivo. `services/notifications.py` gera eventos de domínio e o adaptador `providers/push.py` envia ao serviço de push do navegador. O PWA tem um service worker só para recebimento de mensagens/click, sem cache de páginas ou API. O navegador registra a inscrição com `PushManager`, sem chamadas de dados climáticos a terceiros.
+
 ## Contrato HTTP
 
 - Rotas em `app/api/v1/router.py`; o contrato completo está no Swagger (`/docs`). JSON em camelCase (`CamelModel`), espelhado em `frontend/src/api/types.ts`.
@@ -32,6 +34,7 @@ Onde fica o estado: PostGIS guarda território, alertas, contas, sessões, tema 
 - Autenticação: POST `/auth/register` recebe `{name,email,password,theme?}` e responde 201; POST `/auth/login` recebe `{email,password}` e responde 200. Ambos retornam `{id,name,email,theme}` e criam o cookie `brasil_lens_session` (30 dias, HttpOnly, SameSite=Lax, Secure em produção). GET `/auth/me` recupera a conta ou responde 401; POST `/auth/logout` revoga a sessão e responde 204, mesmo sem sessão. PUT `/me/preferences` recebe `{theme:"light"|"dark"}` e retorna a conta atualizada. Respostas de autenticação/preferências levam `no-store`.
 - Escritas exigem `X-Brasil-Lens-Client: web` e, quando presente, `Origin` em `CORS_ORIGINS`, para impedir CSRF. CORS aceita credenciais só das origens configuradas. E-mails são normalizados (trim + minúsculas); senhas têm 8–128 caracteres no cadastro, sem trim. O hash usa scrypt (N=16384, r=8, p=5) com sal aleatório, fora do event loop. Sessões guardam só SHA-256 do token aleatório; expiram em 30 dias e registros expirados são removidos ao abrir uma sessão. Login/cadastro têm limite de 10 tentativas por e-mail em 5 min no processo; sucesso zera a contagem.
 - Acompanhamento (`/me/followed-municipalities/{code}`): PUT responde 201 com `Location` na primeira vez e 200 se já seguia; DELETE responde 204; POST `.../notifications` liga ou desliga os avisos (404 se o município não é seguido). `/me/*` exige sessão válida; o usuário vem apenas do cookie validado por `api/deps.get_current_user_id`, nunca do cliente. `followed_municipalities.user_id` tem FK para `users.id`. A migration preserva registros antigos em contas legadas sem credenciais, incluindo `local`, sem misturá-los a novos cadastros.
+- Novos acompanhamentos começam com `notificationsEnabled=false`; ativar registra `notifications_opt_in_at`, desativar revoga. GET `/me/notifications/config` retorna `{publicKey:string|null}` com `no-store`, sem a chave privada. POST `/me/notifications/subscriptions` recebe `{endpoint,keys:{p256dh,auth}}`; POST `/me/notifications/unsubscribe` recebe `{endpoint}`; ambos respondem 204 e usam a conta autenticada. Na interface, logout remove a inscrição antes de revogar a sessão. O cadastro não concede permissão de notificações.
 
 ## Cache e degradação
 
@@ -46,7 +49,7 @@ Onde fica o estado: PostGIS guarda território, alertas, contas, sessões, tema 
 
 1. **Clima.** No Brasil, `/weather/current?forecast=false` (capitais) pinta primeiro e `/weather/states` refina. Numa UF, `/weather/state?parent=`; `/weather/municipalities`, paginado, só entra se a anterior falhar. Com zoom ≥ 8, `/weather/viewport`. Ao selecionar, `/weather/current?territory=`.
 2. **Focos.** `/fire-hotspots` traz a metadata; o WMS usa o `cqlFilter` dela; `/summary` e `/identify` recebem `at = metadata.windowEnd`.
-3. **Alertas.** O agendador grava em `weather_alerts`; o frontend consulta `/weather/alerts` a cada 90 s.
+3. **Alertas.** O agendador grava em `weather_alerts`; o frontend consulta `/weather/alerts` a cada 90 s. O job `dispatch_notifications` gera eventos e envia aos dispositivos inscritos para municípios autorizados. O cron do GitHub também ingere/entrega a cada 30 min, sem depender do Render acordado. E-mail futuro consumirá os mesmos eventos, com autorização própria.
 4. **Falha de fonte.** A fonte entra em cooldown; a API devolve `stale` ou um erro com `code`, e o frontend pausa só aquela fonte.
 5. **Localizar.** `POST /territories/locate` → `ST_Covers` na malha canônica.
 6. **Nova ingestão.** Muda o `data_version`, os caches passam a usar chaves novas e o ETag de `/map` muda.

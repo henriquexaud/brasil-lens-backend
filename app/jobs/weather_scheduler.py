@@ -6,13 +6,18 @@ from collections.abc import Awaitable, Callable
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.jobs import import_weather_cemaden_alerts, import_weather_inmet_alerts
+from app.jobs import (
+    dispatch_notifications,
+    import_weather_cemaden_alerts,
+    import_weather_inmet_alerts,
+)
 
 logger = get_logger(__name__)
 
 _JOBS: tuple[tuple[str, Callable[[], Awaitable[int]]], ...] = (
     ("inmet_alerts", import_weather_inmet_alerts.main),
     ("cemaden_alerts", import_weather_cemaden_alerts.main),
+    ("notifications", dispatch_notifications.main),
 )
 
 _tasks: list[asyncio.Task[None]] = []

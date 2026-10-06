@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -69,7 +70,7 @@ async def test_follow_list_unfollow_round_trip(session: AsyncSession) -> None:
         "35",
         "SP",
     )
-    assert followed.notifications_enabled is True
+    assert followed.notifications_enabled is False
 
     await service.follow(session, user, BRASILIA)
     listed = await service.list_followed(session, user)
@@ -124,9 +125,24 @@ async def test_set_notifications_toggles_and_requires_a_follow(session: AsyncSes
     await service.follow(session, user, SAO_PAULO)
     disabled = await service.set_notifications(session, user, SAO_PAULO, False)
     assert disabled.notifications_enabled is False
+    followed = (
+        await session.execute(
+            select(FollowedMunicipality).where(
+                FollowedMunicipality.user_id == user,
+                FollowedMunicipality.municipality_code == SAO_PAULO,
+            )
+        )
+    ).scalar_one()
+    assert followed.notifications_opt_in_at is None
 
     enabled = await service.set_notifications(session, user, SAO_PAULO, True)
     assert enabled.notifications_enabled is True
+    await session.refresh(followed)
+    assert followed.notifications_opt_in_at is not None
+
+    await service.set_notifications(session, user, SAO_PAULO, False)
+    await session.refresh(followed)
+    assert followed.notifications_opt_in_at is None
 
     await session.rollback()
 
@@ -145,7 +161,7 @@ async def test_http_contract(session: AsyncSession) -> None:
         body = created.json()
         assert body["municipalityCode"] == SAO_PAULO
         assert body["stateAbbreviation"] == "SP"
-        assert body["notificationsEnabled"] is True
+        assert body["notificationsEnabled"] is False
         assert "followedAt" in body
 
         assert (await client.put(f"{base}/{SAO_PAULO}")).status_code == 200

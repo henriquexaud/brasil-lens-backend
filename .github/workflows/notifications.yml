@@ -1,0 +1,59 @@
+name: Notificações do PWA
+
+on:
+  schedule:
+    - cron: '17,47 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: notifications
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+      VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+      PUSH_NOTIFICATIONS_ENABLED: 'true'
+      WEATHER_REFRESH_ENABLED: 'false'
+      HYDROGRAPHY_WARMUP_ENABLED: 'false'
+      APP_ENV: production
+      LOG_FORMAT: json
+    steps:
+      - name: Conferir configuração
+        id: config
+        shell: bash
+        run: |
+          if [[ -n "$DATABASE_URL" && -n "$VAPID_PUBLIC_KEY" && -n "$VAPID_PRIVATE_KEY" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Configure DATABASE_URL, VAPID_PUBLIC_KEY e VAPID_PRIVATE_KEY para ativar as notificações."
+          fi
+      - uses: actions/checkout@v7
+        if: steps.config.outputs.enabled == 'true'
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        if: steps.config.outputs.enabled == 'true'
+        with:
+          python-version: '3.12'
+      - name: Instalar dependências
+        if: steps.config.outputs.enabled == 'true'
+        run: pip install .
+      - name: Ingerir avisos INMET
+        if: steps.config.outputs.enabled == 'true'
+        continue-on-error: true
+        run: python -m app.jobs.import_weather_inmet_alerts
+      - name: Ingerir alertas CEMADEN
+        if: steps.config.outputs.enabled == 'true'
+        continue-on-error: true
+        run: python -m app.jobs.import_weather_cemaden_alerts
+      - name: Enviar notificações autorizadas
+        if: steps.config.outputs.enabled == 'true'
+        run: python -m app.jobs.dispatch_notifications
