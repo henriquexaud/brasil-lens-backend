@@ -7,7 +7,7 @@ COMPOSE := docker compose
 # assado na imagem, não sobre o que está em edição.
 DEV := docker compose -f docker-compose.yml -f docker-compose.dev.yml
 
-.PHONY: help up up-api dev down logs migrate revision ingest ingest-quick test lint format check smoke psql reset
+.PHONY: help up up-api dev down logs migrate revision ingest ingest-quick ingest-socioeconomic test lint format check smoke psql reset
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -38,6 +38,9 @@ ingest:         ## Importa territórios e geometrias do IBGE para o mapa
 
 ingest-quick:   ## Ingestão sem geometrias municipais
 	$(COMPOSE) run --rm api python -m app.jobs.bootstrap --skip-municipal-geometries
+
+ingest-socioeconomic: ## Importa os indicadores e séries históricas do IBGE
+	$(COMPOSE) run --rm --no-deps api python -m app.jobs.import_indicators
 
 test:           ## Roda os testes (unitários + integração com banco)
 	$(DEV) run --rm --build api sh -c "alembic upgrade head && pytest -q"

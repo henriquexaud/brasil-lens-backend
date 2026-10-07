@@ -17,7 +17,7 @@ def test_revisions_fit_the_alembic_version_column():
     assert all(len(revision.revision) <= 32 for revision in migration_script().walk_revisions())
 
 
-def test_public_api_exposes_only_geography_and_environment():
+def test_geography_contract_remains_independent_of_socioeconomic():
     paths = app.openapi()["paths"]
     assert not ({"/api/v1/contexts", "/api/v1/indicators", "/api/v1/views"} & paths.keys())
     assert "/api/v1/map/values" not in paths
@@ -25,6 +25,7 @@ def test_public_api_exposes_only_geography_and_environment():
     assert "/api/v1/territories/{ibge_code}/indicators" not in paths
     parameters = {item["name"] for item in paths["/api/v1/map"]["get"]["parameters"]}
     assert parameters == {"level", "parent", "lod"}
+    assert "/api/v1/socioeconomic/values" in paths
 
 
 @pytest.mark.db
@@ -39,6 +40,8 @@ async def test_migration_removes_exclusive_data_and_preserves_shared_references(
             getattr(migration, direction)()
 
     try:
+        # A revisão histórica antecede a camada nova; o rollback restaura esses valores.
+        await session.execute(text("DELETE FROM socioeconomic_values"))
         await session.run_sync(migrate, "downgrade")
         indexes = await session.run_sync(
             lambda s: inspect(s.connection()).get_indexes("indicator_values")

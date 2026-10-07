@@ -7,6 +7,7 @@ Instalação e variáveis de ambiente: [README](../README.md), `.env.example` e 
 - `make up-api`: sobe banco e API (as migrations rodam no startup).
 - `make dev`: stack com reload.
 - `make ingest` / `make ingest-quick`: ingestão IBGE completa / sem malha municipal.
+- `make ingest-socioeconomic`: indicadores e séries anuais do IBGE. Equivalente a `python -m app.jobs.import_indicators`, depois de `alembic upgrade head` e da ingestão territorial. O bootstrap territorial permanece independente. Para uma primeira carga, prefira a série completa; `--latest` em banco vazio não permite calcular crescimento quando falta a observação anterior. `python -m app.jobs.seed_indicators` só atualiza nomes/descrições do catálogo.
 - `make revision m="..."`: nova migration.
 - `make psql`: psql no banco.
 - `make smoke`: confere a API e o mapa contra a API rodando.
@@ -22,6 +23,7 @@ Instalação e variáveis de ambiente: [README](../README.md), `.env.example` e 
 - O nome do teste descreve o comportamento (`test_outage_serves_last_reading_as_previous_data_and_pauses_the_source`). Regressão corrigida ganha teste.
 - Mudou um provider? Cubra o parser com fixture real, campo faltante (→ `null`) e formato inesperado (→ `ProviderError`). Mudou cache ou fallback? Cubra frescor, marcação `stale`/`partial` e o caminho sem Redis.
 - mypy estrito; `DeprecationWarning` de `app.*` quebra a suíte.
+- `test_socioeconomic.py` cobre ano único, cobertura PNAD, cache próprio, reutilização nacional entre recortes/anos equivalentes, renovação de resumos por ingestão/geografia/ano, ETag, município sem geometria, denominadores sem uso de ano futuro e rollback de lotes. Classificação, agregados e fórmulas têm fixtures sem rede. A revisão histórica de remoção é testada dentro de uma transação que retira temporariamente os valores novos e os restaura no rollback.
 
 ## Receitas
 
@@ -68,11 +70,12 @@ Testes não enviam mensagens a dispositivos reais. Para conferir o envio real, u
 - Logs: `render logs --resources srv-date5dugekts73affgeg --tail` e `vercel logs <url-do-deploy>`. Saúde: `curl https://brasil-lens-api.onrender.com/api/v1/health/ready`.
 - Trocar uma variável do Render: painel → Environment → Save and deploy. Na Vercel: `vercel env update <nome> production` e redeploy.
 - Nova migration entra no próximo deploy da API; nova ingestão é o passo 2.
+- Para o contexto Socioeconômico: publicar a API com `0012_socioeconomic`, executar `python -m app.jobs.import_indicators` contra o banco de destino e então publicar o frontend. A migration cria o catálogo; o mapa precisa da ingestão para ter valores. Atualização dos indicadores é um job separado, sem mudar o agendador de clima/notificações.
 
 ### Limites que moldam o uso
 
 - O Render dorme após 15 min sem tráfego e leva ~1 min para acordar. O agendador para junto e roda quando a API acorda; o cron de notificações ingere e envia mesmo com ela dormindo. Os alertas do CEMADEN expiram sozinhos (invariante 10).
 - Não use pinger para manter o Render acordado: o agendador consultaria o banco a cada 10 min e esgotaria as 100 CU-h/mês do Neon, que dorme após 5 min sem consultas. O health check do Render usa `/health`, que não toca o banco.
 - A instância tem 512 MB e 0,1 de CPU. Medido com todas as malhas municipais em cache, o processo fica em ~150 MB, porque os caches de GeoJSON guardam JSON pronto ([architecture](architecture.md)).
-- O Neon tem 0,5 GB (o banco ocupa ~80 MB) e 5 GB/mês de egress; o cache do `/map` evita reler as malhas.
+- O Neon tem 0,5 GB e 5 GB/mês de egress; o banco base ocupa ~80 MB. Com a série socioeconômica completa, foram medidos ~230 MB e 1,09 milhão de valores na cópia local em 2026-10-07. A consulta separada de valores e o cache do `/map` evitam retransmitir a malha a cada indicador/ano.
 - A cota grátis da Open-Meteo (10 mil chamadas/dia) é por IP, e o IP de saída do Render é compartilhado por todos os serviços da região: em 2026-09-28 a primeira chamada do serviço já recebeu "limite diário atingido". Por isso a API chama a Open-Meteo pelo repasse da Vercel. Se o clima voltar a dar `provider_rate_limited` em produção, confira a chave nos dois lados e os logs da função (`vercel logs`).

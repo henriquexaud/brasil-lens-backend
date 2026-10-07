@@ -20,6 +20,28 @@ A migration `0010_user_accounts` cria `users` (nome, e-mail único normalizado, 
 
 `python -m app.jobs.bootstrap [--skip-municipal-geometries] [--states 35,31]` roda `import_territories` (Localidades v1) e depois `import_geometries` (Malhas v3; a municipal tem ~60 MB, timeout de 120 s e concorrência 4). É idempotente e grava `ingestion_runs`/`datasets`, que definem o `data_version`. As tolerâncias só mudam na próxima ingestão. Nenhuma requisição de usuário chama o IBGE.
 
+## Indicadores socioeconômicos do IBGE
+
+`0012_socioeconomic` acrescenta `socioeconomic_indicators` (catálogo de 14 indicadores) e `socioeconomic_values` (PK território/indicador/ano, valor decimal, dataset e execução de ingestão). O nome distingue essas tabelas das removidas pela revisão histórica `0009`; nenhuma migration antiga é alterada. Territórios, LODs, contas, notificações e tabelas climáticas são reutilizados sem modificação. `/map` continua aceitando apenas `level`, `parent` e `lod`.
+
+`python -m app.jobs.import_indicators` ingere a série completa da API Agregados v3, com até quatro consultas concorrentes, municípios por UF e publicações preferenciais aplicadas em ordem. O catálogo declarativo está em `providers/ibge/datasets.py`:
+
+| Indicadores | Fontes / regra |
+|---|---|
+| População; urbana; área | 6579 (estimativas), 4714 (Censo 2022), 202/1301 (2010), 9923 (urbana 2022) |
+| PIB; agropecuária; indústria; serviços | 5938, em mil reais convertidos para reais; serviços somam 6575 + 525 |
+| Renda domiciliar per capita | PNAD anual 7395, renda mensal real; Brasil/regiões/UFs |
+| Desemprego | PNAD 6468, média dos trimestres publicados; 4562 prevalece com média anual oficial; Brasil/regiões/UFs |
+| Densidade; PIB per capita; urbanização | Razão com o denominador mais recente do mesmo ano ou anterior, nunca de um ano futuro |
+| Crescimento populacional | Variação geométrica anualizada entre observações consecutivas disponíveis |
+| Participação no PIB nacional | PIB territorial dividido pelo PIB do Brasil no mesmo ano |
+
+Sentinelas são descartadas, valores ausentes continuam `null` e derivados com denominador zero/ausente não são criados. Catálogo e detalhe exibem os anos realmente presentes em cada nível. A cobertura municipal da PNAD não é extrapolada. Valores não exigem geometria: município com dado e sem malha permanece no detalhe, mas não pode ser pintado.
+
+Quantis de até cinco classes são calculados sobre todos os territórios do mesmo nível/indicador/ano, inclusive quando se pede uma UF: uma cor municipal mantém o mesmo significado entre UFs. `classification` informa `scope: national`, limites e quebras; `statistics` descreve somente o recorte pedido. Ao preparar o mosaico municipal nacional, o frontend mantém a legenda estadual até a publicação do desenho municipal. A classificação não indica risco nem juízo de valor.
+
+A importação tem uma transação para todas as fontes e derivados; uma falha aborta e preserva o snapshot anterior. `--latest` limita cada fonte ao seu último ano (não elimina histórico existente); `--periods 2021|2022` seleciona períodos publicados; `--states 35,31` restringe apenas os municípios e mantém os agregados nacionais; `--indicators population,gdp` limita indicadores/dependências; `--skip-municipalities` limita a carga a Brasil/regiões/UFs. A prioridade censitária e da PNAD anual é preservada. Não há ingestão no request nem polling de fonte socioeconômica no agendador climático.
+
 ## Hidrografia (ANA/SNIRH)
 
 `GET /hydrography?zoom=&bbox=` (`services/hydrography.py`). Só o zoom e a área definem a resposta; a rota não usa o banco.

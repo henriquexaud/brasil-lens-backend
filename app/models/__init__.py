@@ -1,4 +1,5 @@
 from app.models.followed_municipality import FollowedMunicipality
+from app.models.indicator import Indicator, IndicatorOrigin, IndicatorValue
 from app.models.ingestion import Dataset, IngestionRun, IngestionStatus
 from app.models.notification import NotificationEvent, PushDelivery, PushSubscription
 from app.models.territory import (
@@ -24,6 +25,9 @@ __all__ = [
     "Dataset",
     "FollowedMunicipality",
     "GeometryLOD",
+    "Indicator",
+    "IndicatorOrigin",
+    "IndicatorValue",
     "IngestionRun",
     "IngestionStatus",
     "NotificationEvent",

@@ -4,6 +4,8 @@
 
 Clima e meio ambiente do Brasil num mapa (país → UF → município): clima atual e previsão de 3 dias, chuva em 48 h, alertas INMET/CEMADEN, focos do INPE, hidrografia da ANA, busca, localização e municípios acompanhados. É um produto em evolução, de dono único.
 
+O contexto Socioeconômico recupera os 14 indicadores de população, economia e território do IBGE, com séries anuais. População e Economia preservam suas paletas; Outros tem uma paleta azul própria, conforme a interface documentada no frontend. O seletor alterna entre dois componentes de aplicação: o climático preserva suas consultas e regras; o socioeconômico usa somente leituras persistidas e a geografia compartilhada ([ADR-13](decisions.md)).
+
 Princípios:
 1. **Dados honestos:** estimado aparece marcado, antigo aparece marcado e o que é duvidoso não aparece.
 2. **Interface leve e estável:** detalhes são para o frontend (`frontend/docs/ui.md`).
@@ -28,6 +30,7 @@ O Postgres também guarda eventos de aviso, inscrições Web Push por conta e en
 ## Contrato HTTP
 
 - Rotas em `app/api/v1/router.py`; o contrato completo está no Swagger (`/docs`). JSON em camelCase (`CamelModel`), espelhado em `frontend/src/api/types.ts`.
+- Socioeconômico: GET `/socioeconomic/indicators?level=` retorna catálogo, cobertura territorial e anos com dado; GET `/socioeconomic/values?level=&parent=&indicator=&year=latest` retorna valores por código, estatísticas e classificação, sem geometria; GET `/socioeconomic/territories/{code}?year=latest` retorna identificação e indicadores com fonte/ano. `year` aceita `latest` ou 1900–2100. Um pai precisa corresponder ao nível imediatamente superior. Essas respostas usam ETag e `max-age=300`.
 - Formato de erro: `{"error": {"code", "message", "details"}}`, com mensagem em pt-BR. Códigos: `invalid_parameter` 400, `authentication_required` 401, `forbidden` 403, `not_found` 404, `conflict` 409, validação 422, `auth_rate_limited` 429, `provider_error` 502, `provider_rate_limited` 503 (com `details.retryAfterSeconds`).
 - O payload das fontes externas traz `status`: `ok`, `stale` (vindo do fallback) ou `partial`. Quem consome deve mostrar esse status.
 - `/map` responde com ETag e `max-age=3600, stale-while-revalidate=86400`; `/weather/alerts`, com ETag e `no-cache` (o polling de 90 s recebe `304` vazio enquanto nada muda); as demais rotas geográficas, com `max-age=300`; as de acompanhamento, com `no-store`. Nas rotas de clima, `force=true` busca de novo leituras com mais de 5 min.
@@ -42,6 +45,7 @@ O Postgres também guarda eventos de aviso, inscrições Web Push por conta e en
 - GeoJSON pesado (`/map`, `/hydrography`) fica em memória como o JSON pronto da resposta (`schemas/common.to_json`), e a rota devolve um `Response` direto. Como modelo, 128 áreas de hidrografia ocupavam ~375 MB (~43 MB em JSON) e cada acerto revalidava e serializava tudo de novo. O `response_model` continua declarado para o Swagger, e o schema continua sendo o contrato.
 - O gzip usa nível 6: o 9, padrão do Starlette, custa 4x mais CPU num GeoJSON de 2 MB para ganhar menos de 1%.
 - Todo derivado da geografia leva `data_version` (a última ingestão territorial) na chave; uma nova ingestão invalida tudo sem varredura.
+- Socioeconômico tem versão própria (última execução bem-sucedida de `seed_indicators`/`import_indicators`); valores e resumos também incluem `data_version` da geografia. Cache local por 5 min: 32 respostas JSON de catálogo/valores, 64 resumos JSON de território e 8 snapshots nacionais de valores/classificação. Os snapshots são compartilhados entre recortes e entre `latest` e seu ano resolvido, evitando reler a série e recalcular os mesmos quantis ao navegar entre UFs. A identificação do indicador usa uma consulta direta ao catálogo, sem repetir a varredura dos anos disponíveis. Não depende do Redis nem dos ciclos climáticos. A ingestão publica os valores e derivados em uma transação: erro de fonte conserva a série anterior.
 - Cada fonte tem um `SourceCooldown` (60 s). O fallback tem limite de idade e sai marcado. Buscas em voo são compartilhadas por chave (dedup e locks).
 - Ao mudar um cache: payload incompatível pede namespace novo (ex.: `weather-reading-v2`); mudança de frescor precisa ser feita também no frontend. Os TTLs de cada domínio estão no doc do domínio e no código.
 
@@ -53,5 +57,6 @@ O Postgres também guarda eventos de aviso, inscrições Web Push por conta e en
 4. **Falha de fonte.** A fonte entra em cooldown; a API devolve `stale` ou um erro com `code`, e o frontend pausa só aquela fonte.
 5. **Localizar.** `POST /territories/locate` → `ST_Covers` na malha canônica.
 6. **Nova ingestão.** Muda o `data_version`, os caches passam a usar chaves novas e o ETag de `/map` muda.
+7. **Socioeconômico.** Carrega catálogo por nível e valores separados da malha. `latest` resolve um único ano para todo o nível, sem completar lacunas com anos anteriores. Na visão do Brasil, começa com UFs e prepara o mosaico municipal existente com `weatherEnabled=false` e uma consulta nacional de valores; troca o desenho inteiro após concluir os caminhos, junto com a legenda municipal. Ausência de valor ou malha de um município não bloqueia os outros. Renda/desemprego da PNAD ficam por UF, sem pintura municipal inventada.
 
 Domínios: [clima](weather.md) · [alertas](alerts.md) · [focos](fire.md) · [geografia](geography.md) · Regras: [invariantes](invariants.md) · Porquês: [decisões](decisions.md)

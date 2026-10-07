@@ -2,6 +2,8 @@
 
 API de clima e meio ambiente do Brasil para o [frontend](https://github.com/henriquexaud/brasil-lens-frontend) do Brasil Lens. Combina a geografia do IBGE (PostGIS) com clima (Open-Meteo), alertas (INMET, CEMADEN), focos de calor (INPE) e hidrografia (ANA).
 
+O contexto Socioeconômico acrescenta 14 indicadores anuais de população, economia e território do IBGE, em tabelas e consultas independentes do clima.
+
 No ar: aplicação em https://brasil-lens.vercel.app e API em https://brasil-lens-api.onrender.com/docs (plano grátis: o primeiro acesso após inatividade leva ~1 min).
 
 ## Rodar com Docker
@@ -13,6 +15,7 @@ git clone https://github.com/henriquexaud/brasil-lens-backend.git
 cd brasil-lens-backend
 docker compose up --build --wait                       # banco, Redis, API e frontend (build a partir do GitHub)
 docker compose run --rm api python -m app.jobs.bootstrap   # ingestão do IBGE, necessária para o mapa
+docker compose run --rm --no-deps api python -m app.jobs.import_indicators # séries socioeconômicas
 ```
 
 - Interface em `http://localhost:5173`; API e Swagger em `http://localhost:8000/docs`.
