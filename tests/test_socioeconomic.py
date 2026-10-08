@@ -108,6 +108,29 @@ async def test_latest_resolves_one_year_and_keeps_missing_values(monkeypatch):
     assert values.await_count == 1
 
 
+@pytest.mark.parametrize("level", [TerritoryLevel.STATE, TerritoryLevel.MUNICIPALITY])
+async def test_population_map_keeps_ten_classes_including_repeated_quantiles(monkeypatch, level):
+    monkeypatch.setattr(service, "list_indicators", AsyncMock(return_value=catalog()))
+    monkeypatch.setattr(service, "data_version", AsyncMock(return_value=9))
+    monkeypatch.setattr(repository, "indicator_id", AsyncMock(return_value=1))
+    monkeypatch.setattr(
+        repository,
+        "values",
+        AsyncMock(return_value=[(str(index), None, Decimal(index // 3)) for index in range(27)]),
+    )
+    result = await service.get_values(
+        AsyncMock(), level=level, parent=None, indicator="population", year="latest"
+    )
+    assert result.classification.classes == 10
+    assert len(result.classification.breaks) == 10
+    indices_by_value = {}
+    for item in result.values:
+        assert 0 <= item.class_index < 10
+        if item.value in indices_by_value:
+            assert item.class_index == indices_by_value[item.value]
+        indices_by_value[item.value] = item.class_index
+
+
 async def test_new_ingestion_changes_cache_but_weather_version_does_not(monkeypatch):
     version = AsyncMock(return_value=catalog())
     monkeypatch.setattr(service, "list_indicators", version)

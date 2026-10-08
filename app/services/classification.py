@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Literal
 
-DEFAULT_CLASS_COUNT = 5
+DEFAULT_CLASS_COUNT = 10
 ClassificationMethod = Literal["quantile"]
 
 
@@ -92,16 +92,11 @@ def describe(
     )
 
     requested = max(1, classes)
-    raw_breaks = [
+    breaks = [
         _quantize(_percentile(present, (index + 1) / requested)) for index in range(requested)
     ]
 
-    breaks: list[Decimal] = []
-    for candidate in raw_breaks:
-        if not breaks or candidate > breaks[-1]:
-            breaks.append(candidate)
-    if breaks[-1] != statistics.max:
-        breaks[-1] = statistics.max
+    breaks[-1] = statistics.max
 
     return ValueDistribution(
         statistics=statistics,

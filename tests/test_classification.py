@@ -45,26 +45,33 @@ def test_valores_todos_iguais_nao_dividem_por_zero() -> None:
 
     assert distribution.normalize(Decimal("7")) == 0.0
     assert distribution.classification is not None
-    # Uma classe só: manter 5 quebras idênticas produziria legenda enganosa.
-    assert distribution.classification.classes == 1
+    assert distribution.classification.classes == 10
+    assert distribution.classification.breaks == [Decimal("7")] * 10
     assert distribution.class_index(Decimal("7")) == 0
 
 
-def test_quebras_sao_deduplicadas_quando_ha_poucos_valores() -> None:
-    distribution = describe(_decimals(1, 1, 1, 9), classes=5)
+def test_repeated_quantiles_keep_ten_classes_and_equal_values_share_a_color() -> None:
+    distribution = describe(_decimals(1, 1, 1, 9))
 
     assert distribution.classification is not None
     breaks = distribution.classification.breaks
-    assert breaks == sorted(set(breaks))
+    assert breaks == sorted(breaks)
+    assert len(breaks) == 10
+    assert len(set(breaks)) < 10
+    assert distribution.class_index(Decimal("1")) == 0
+    assert distribution.class_index(Decimal("9")) == 9
     assert breaks[-1] == Decimal("9")
 
 
-def test_ultima_quebra_e_sempre_o_maximo() -> None:
-    distribution = describe(_decimals(*range(1, 101)), classes=5)
+def test_default_has_ten_quantiles_and_maximum_as_last_break() -> None:
+    distribution = describe(_decimals(*range(1, 101)))
 
     assert distribution.classification is not None
     assert distribution.classification.breaks[-1] == Decimal("100")
-    assert distribution.classification.classes == 5
+    assert distribution.classification.classes == 10
+    assert [distribution.class_index(Decimal(value)) for value in range(1, 101, 10)] == list(
+        range(10)
+    )
 
 
 def test_classes_cobrem_todos_os_valores() -> None:
