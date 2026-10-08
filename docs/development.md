@@ -79,3 +79,19 @@ Testes não enviam mensagens a dispositivos reais. Para conferir o envio real, u
 - A instância tem 512 MB e 0,1 de CPU. Medido com todas as malhas municipais em cache, o processo fica em ~150 MB, porque os caches de GeoJSON guardam JSON pronto ([architecture](architecture.md)).
 - O Neon tem 0,5 GB e 5 GB/mês de egress; o banco base ocupa ~80 MB. Com a série socioeconômica completa, foram medidos ~230 MB e 1,09 milhão de valores na cópia local em 2026-10-07. A consulta separada de valores e o cache do `/map` evitam retransmitir a malha a cada indicador/ano.
 - A cota grátis da Open-Meteo (10 mil chamadas/dia) é por IP, e o IP de saída do Render é compartilhado por todos os serviços da região: em 2026-09-28 a primeira chamada do serviço já recebeu "limite diário atingido". Por isso a API chama a Open-Meteo pelo repasse da Vercel. Se o clima voltar a dar `provider_rate_limited` em produção, confira a chave nos dois lados e os logs da função (`vercel logs`).
+
+### Ingerir Política
+
+Depois de `alembic upgrade head` e da geografia, execute uma vez para cada ano, com o banco de destino configurado:
+
+```sh
+python -m app.jobs.import_elections --year 2022
+python -m app.jobs.import_elections --year 2024
+python -m app.jobs.import_elections --year 2026
+```
+
+Os arquivos ficam no cache de download `/tmp/brasil-lens-tse` (`--cache-dir` muda o diretório). São arquivos oficiais do [Portal de Dados Abertos do TSE](https://dadosabertos.tse.jus.br/dataset/resultados-2026), nas famílias `votacao_candidato_munzona`, `votacao_partido_munzona`, `detalhe_votacao_munzona` e no de/para `municipio_tse_ibge` da CDN do TSE. CSV em Latin-1, separado por `;`; a ingestão usa os campos modernos de votos válidos e escolhe o arquivo BRASIL quando existe, evitando somá-lo às cópias por UF. Falha de formato ou de correspondência territorial impede a troca da edição.
+
+Para atualizar 2026, execute `python -m app.jobs.import_elections --year 2026 --refresh`. Após a publicação final e o encerramento do pleito, acrescente `--complete` para retirar a marca de andamento. Sem `--refresh`, arquivos locais são reaproveitados; não há atualização automática, consulta ao TSE nas rotas ou ampliação para outros anos. Planeje alguns GB de disco temporário para a consolidação; a aplicação guarda apenas resumos e identidades necessárias. Não inclua os ZIPs ou o SQLite no git.
+
+Na stack compartilhada, use um container temporário com o código montado e a rede existente para migrations/ingestão. Para testar a interface, API e Vite devem usar portas separadas (por exemplo 8001/5174), `REDIS_CACHE_PREFIX` próprio, `WEATHER_REFRESH_ENABLED=false` e `HYDROGRAPHY_WARMUP_ENABLED=false`; não recrie os serviços compartilhados. Testes de banco usam PostGIS temporário e cópia apenas dos dados públicos. As regressões de política estão em `tests/test_political.py` e `frontend/tests/political.test.mjs`.

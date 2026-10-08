@@ -2,6 +2,7 @@ from app.models.followed_municipality import FollowedMunicipality
 from app.models.indicator import Indicator, IndicatorOrigin, IndicatorValue
 from app.models.ingestion import Dataset, IngestionRun, IngestionStatus
 from app.models.notification import NotificationEvent, PushDelivery, PushSubscription
+from app.models.political import PoliticalCandidate, PoliticalRelease, PoliticalResult
 from app.models.territory import (
     EXPECTED_PARENT_LEVEL,
     REQUIRES_PARENT,
@@ -31,6 +32,9 @@ __all__ = [
     "IngestionRun",
     "IngestionStatus",
     "NotificationEvent",
+    "PoliticalCandidate",
+    "PoliticalRelease",
+    "PoliticalResult",
     "PushDelivery",
     "PushSubscription",
     "Territory",

@@ -4,6 +4,8 @@ API de clima e meio ambiente do Brasil para o [frontend](https://github.com/henr
 
 O contexto Socioeconômico acrescenta 14 indicadores anuais de população, economia e território do IBGE, em tabelas e consultas independentes do clima.
 
+Política acrescenta resultados, eleitos no pleito e participação eleitoral de 2022/2024/2026, com resumos municipais compactos do TSE. Exige a migration `0013_political` e `python -m app.jobs.import_elections --year ANO`; [importação e atualização](docs/development.md#ingerir-política). 2026 começa como parcial.
+
 No ar: aplicação em https://brasil-lens.vercel.app e API em https://brasil-lens-api.onrender.com/docs (plano grátis: o primeiro acesso após inatividade leva ~1 min).
 
 ## Rodar com Docker

@@ -51,3 +51,9 @@ A importação tem uma transação para todas as fontes e derivados; uma falha a
 - **Área pedida:** o frontend encaixa o bbox numa grade (1° no zoom 6–8, 0,5° no 8–10, 0,25° acima), reaproveita qualquer área já carregada que cubra a vista e não manda bbox abaixo do zoom 6.
 - **Cache:** chave `(detalhe, área)`, 24 h em memória (como JSON pronto) e no Redis, com HTTP `max-age` de 1 h. Se a ANA falha, entra o cooldown de 60 s, os rios caem para o snapshot, os lagos saem e a resposta vira `partial`, com cache de só 60 s (sem Redis, e o mesmo `max-age`).
 - Testes: `test_hydrography.py`.
+
+### Municípios eleitorais
+
+Política usa o [de/para oficial TSE–IBGE](https://cdn.tse.jus.br/estatistica/sead/odsele/municipio_tse_ibge/municipio_tse_ibge.zip). O código municipal do TSE não é código IBGE nem permite deduzir a UF por prefixo. A ingestão normaliza somente o preenchimento numérico do identificador e exige correspondência explícita com um território já ingerido; município brasileiro sem correspondência aborta a publicação. As tabelas finais referenciam `territories.ibge_code` e reutilizam todas as geometrias/LODs e o mosaico existentes.
+
+Registros do exterior e em trânsito sem município da malha são excluídos e contabilizados na proveniência. Por isso o resumo Brasil é a soma dos municípios cobertos, podendo divergir do total nacional do TSE que inclui o exterior. Ausência de eleição municipal no DF/Fernando de Noronha ou de segundo turno numa localidade fica sem dados. A malha é a atual do IBGE, não uma reconstrução histórica; a interface explicita essa limitação.
