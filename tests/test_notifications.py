@@ -52,6 +52,7 @@ async def session(session: AsyncSession) -> AsyncIterator[AsyncSession]:
     async with AsyncSession(
         bind=await session.connection(),
         expire_on_commit=False,
+        autoflush=False,
         join_transaction_mode="create_savepoint",
     ) as isolated:
         yield isolated

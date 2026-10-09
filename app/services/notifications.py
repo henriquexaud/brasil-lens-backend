@@ -123,6 +123,8 @@ async def dispatch(session: AsyncSession) -> int:
             except ProviderError as exc:
                 status = (exc.details or {}).get("status")
                 if status in {404, 410}:
+                    # A exclusão em cascata apaga a entrega; grave a tentativa antes disso.
+                    await session.flush()
                     await repo.remove_expired_subscription(session, subscription.id)
                 else:
                     delivery.last_error = exc.message
