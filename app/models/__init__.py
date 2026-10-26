@@ -11,6 +11,12 @@ from app.models.territory import (
     TerritoryGeometry,
     TerritoryLevel,
 )
+from app.models.transport import (
+    TRANSPORT_LAYERS,
+    TransportFeature,
+    TransportOverview,
+    TransportTotal,
+)
 from app.models.user import User, UserSession
 from app.models.weather import (
     WeatherAlert,
@@ -23,6 +29,7 @@ from app.models.weather import (
 __all__ = [
     "EXPECTED_PARENT_LEVEL",
     "REQUIRES_PARENT",
+    "TRANSPORT_LAYERS",
     "Dataset",
     "FollowedMunicipality",
     "GeometryLOD",
@@ -40,6 +47,9 @@ __all__ = [
     "Territory",
     "TerritoryGeometry",
     "TerritoryLevel",
+    "TransportFeature",
+    "TransportOverview",
+    "TransportTotal",
     "User",
     "UserSession",
     "WeatherAlert",

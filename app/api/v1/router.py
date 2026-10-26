@@ -10,6 +10,7 @@ from app.api.v1 import (
     political,
     socioeconomic,
     territories,
+    transport,
     weather,
 )
 from app.api.v1 import map as map_routes
@@ -26,3 +27,4 @@ api_router.include_router(political.router)
 api_router.include_router(weather.router)
 api_router.include_router(hydrography.router)
 api_router.include_router(fire_hotspots.router)
+api_router.include_router(transport.router)

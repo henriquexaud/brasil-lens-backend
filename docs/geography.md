@@ -1,4 +1,4 @@
-# Geografia (IBGE, território e hidrografia ANA)
+# Geografia (IBGE, território, hidrografia ANA e transporte)
 
 ## Território
 
@@ -61,6 +61,16 @@ UF, região e Brasil somam os municípios da fonte pelo prefixo do código IBGE 
 - **Área pedida:** o frontend encaixa o bbox numa grade (1° no zoom 6–8, 0,5° no 8–10, 0,25° acima), reaproveita qualquer área já carregada que cubra a vista e não manda bbox abaixo do zoom 6.
 - **Cache:** chave `(detalhe, área)`, 24 h em memória (como JSON pronto) e no Redis, com HTTP `max-age` de 1 h. Se a ANA falha, entra o cooldown de 60 s, os rios caem para o snapshot, os lagos saem e a resposta vira `partial`, com cache de só 60 s (sem Redis, e o mesmo `max-age`).
 - Testes: `test_hydrography.py`.
+
+## Transporte (DNIT e IBGE)
+
+`0015_transport` cria `transport_features` (camada, nome, atributos em JSONB, geometria simplificada e dataset), `transport_overviews` (o traçado nacional fundido de federais, ferrovias e hidrovias) e `transport_totals` (extensão em km por território e camada; portos por contagem). Decisão e alternativas no [ADR-17](decisions.md).
+
+`python -m app.jobs.import_transport` lê:
+- **SNV do DNIT** (`providers/dnit.py`): a versão mais recente de `vgeo:vw_snv_rod`, em páginas de 2.000 trechos ordenadas por `id_snv`. A superfície vira texto (`DUP` → "Duplicada", `PAV`, `EOD`, `EOP`, `IMP`, `LEN`); `PLA`, `EOI` e `TRV` ficam de fora. Nome `BR-xxx`, código SNV, administração e trecho (`Local_Inicio – Local_Fim`).
+- **BC250 2025 do IBGE** (`providers/bc250.py`, com `providers/shapefile.py` lendo Point/PolyLine e DBF pela biblioteca padrão): `rod_trecho_rodoviario_l` (estaduais = `Estadual/Distrital`; locais = municipais, desconhecidas e sem jurisdição), `fer_trecho_ferroviario_l`, `hdv_trecho_hidroviario_l` e `hdv_complexo_portuario_p`. Federais e propriedades particulares do BC250 são descartadas, assim como o que não está construído. Valores desconhecidos (`Desconhecida`, `Não aplicável`, `Outros`) não viram atributo. Das locais só se guarda o revestimento.
+
+Na mesma transação: trechos simplificados a 0,0003° (preservando trechos curtos), traçado nacional por camada (`ST_LineMerge` das partes e simplificação a 0,01°) e extensão por município (`ST_Intersection` com a malha `detail`, comprimento geodésico), somada por prefixo do código IBGE. Porto conta para o município mais próximo até 0,05°. Medido em 2026-10-26: 5.336 federais, 34.450 estaduais, 74.019 locais, 464 ferrovias, 134 hidrovias e 130 portos; Brasil com 82,3 mil km de federais, 238,9 mil de estaduais, 26,2 mil de ferrovias e 35,4 mil de hidrovias. Testes: `test_transport.py`.
 
 ### Municípios eleitorais
 
