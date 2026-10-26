@@ -42,6 +42,16 @@ Quantis de dez classes são calculados sobre todos os territórios do mesmo nív
 
 A importação tem uma transação para todas as fontes e derivados; uma falha aborta e preserva o snapshot anterior. `--latest` limita cada fonte ao seu último ano (não elimina histórico existente); `--periods 2021|2022` seleciona períodos publicados; `--states 35,31` restringe apenas os municípios e mantém os agregados nacionais; `--indicators population,gdp` limita indicadores/dependências; `--skip-municipalities` limita a carga a Brasil/regiões/UFs. A prioridade censitária e da PNAD anual é preservada. Não há ingestão no request nem polling de fonte socioeconômica no agendador climático.
 
+## Indicadores do Meio ambiente (PRODES e MapBiomas)
+
+`0014_environment_indicators` acrescenta `context` ao catálogo (`socioeconomic` | `environment`) e os indicadores `deforestation_prodes` (km², 2 casas) e `forest_cover` (%, 1 casa). Os valores ficam em `socioeconomic_values`, como os do IBGE ([ADR-15](decisions.md)).
+
+`python -m app.jobs.import_environment` lê:
+- **PRODES/INPE** (`providers/prodes.py`): para cada um dos seis biomas, o JSON de áreas do painel do TerraBrasilis e o catálogo de municípios com `codibge`. Só períodos de um ano entram (os bienais e o acumulado até 2000/2007 ficam de fora). A soma por município cobre os biomas em que ele aparece, só nos anos que todos os biomas publicaram; município listado sem área no ano vale 0 km² medidos. `last_update_date.json` vira `source_updated_at` do dataset.
+- **MapBiomas Coleção 11** (`providers/mapbiomas.py`): aba `COVERAGE_11` do xlsx municipal, lida em streaming. Floresta = nível 1 `1. Forest`; o denominador é a soma de todas as classes do município no ano. Linhas sem `geocode` de 7 dígitos (o rodapé e as lagoas) são descartadas. Anos 1985, 1990, …, 2020 e 2021 em diante.
+
+UF, região e Brasil somam os municípios da fonte pelo prefixo do código IBGE (floresta: soma de hectares de floresta sobre soma de área, nunca média de percentuais). A transação é única: falha de uma fonte preserva a série anterior. Testes: `test_environment.py`, sem rede (fixtures de JSON e um xlsx mínimo gerado no teste).
+
 ## Hidrografia (ANA/SNIRH)
 
 `GET /hydrography?zoom=&bbox=` (`services/hydrography.py`). Só o zoom e a área definem a resposta; a rota não usa o banco.

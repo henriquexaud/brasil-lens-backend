@@ -24,6 +24,7 @@ class IndicatorSeed:
     origin: IndicatorOrigin
     decimal_places: int
     display_order: int
+    context: str = "socioeconomic"
 
 
 CATALOG: tuple[IndicatorSeed, ...] = (
@@ -221,9 +222,42 @@ CATALOG: tuple[IndicatorSeed, ...] = (
 )
 
 
-async def seed_catalog(session: AsyncSession) -> int:
+# Publicado no contexto Meio ambiente e alimentado por `import_environment` (ADR-15).
+ENVIRONMENT_CATALOG: tuple[IndicatorSeed, ...] = (
+    IndicatorSeed(
+        key="deforestation_prodes",
+        name="Desmatamento anual",
+        unit="km2",
+        description=(
+            "Área de vegetação nativa suprimida no ano PRODES (agosto a julho), somando "
+            "os seis biomas monitorados pelo INPE. O PRODES mapeia o bioma inteiro: zero "
+            "é medição, não ausência. Um ano só entra quando todos os biomas o publicaram."
+        ),
+        origin=IndicatorOrigin.SOURCED,
+        decimal_places=2,
+        display_order=110,
+        context="environment",
+    ),
+    IndicatorSeed(
+        key="forest_cover",
+        name="Cobertura florestal",
+        unit="%",
+        description=(
+            "Parte da área do território coberta por floresta (formação florestal, "
+            "savânica, mangue, floresta alagável e restinga arbórea), segundo a Coleção 11 "
+            "do MapBiomas. Série a cada cinco anos desde 1985 e anual a partir de 2021."
+        ),
+        origin=IndicatorOrigin.SOURCED,
+        decimal_places=1,
+        display_order=120,
+        context="environment",
+    ),
+)
+
+
+async def seed_catalog(session: AsyncSession, catalog: tuple[IndicatorSeed, ...] = CATALOG) -> int:
     written = 0
-    for seed in CATALOG:
+    for seed in catalog:
         statement = (
             insert(Indicator)
             .values(
@@ -234,6 +268,7 @@ async def seed_catalog(session: AsyncSession) -> int:
                 origin=seed.origin,
                 decimal_places=seed.decimal_places,
                 display_order=seed.display_order,
+                context=seed.context,
             )
             .on_conflict_do_update(
                 index_elements=[Indicator.key],
@@ -244,6 +279,7 @@ async def seed_catalog(session: AsyncSession) -> int:
                     "origin": seed.origin,
                     "decimal_places": seed.decimal_places,
                     "display_order": seed.display_order,
+                    "context": seed.context,
                     "updated_at": datetime.now(UTC),
                 },
             )

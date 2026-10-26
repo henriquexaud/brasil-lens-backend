@@ -185,7 +185,7 @@ async def test_territory_overview_cache_tracks_ingestion_geography_and_year(monk
     assert await service.get_overview(session, "35", "latest") == first
     assert values.await_count == detail.await_count == 1
     await service.get_overview(session, "35", "2022")
-    assert values.call_args.args[-1] == 2022
+    assert values.call_args.args[2] == 2022
     version.return_value = "2"
     await service.get_overview(session, "35", "latest")
     geography_version.return_value = 10

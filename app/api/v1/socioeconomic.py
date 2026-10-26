@@ -10,6 +10,7 @@ from app.models import TerritoryLevel
 from app.schemas.common import CamelModel, to_json
 from app.schemas.socioeconomic import IndicatorListResponse, MapValuesResponse, TerritoryOverview
 from app.services import socioeconomic as service
+from app.services.socioeconomic import IndicatorContext
 
 router = APIRouter(prefix="/socioeconomic", tags=["socioeconomic"])
 Session = Annotated[AsyncSession, Depends(get_session)]
@@ -32,9 +33,12 @@ def conditional(request: Request, result: CamelModel) -> Response:
     summary="Indicadores socioeconômicos e anos disponíveis",
 )
 async def indicators(
-    request: Request, session: Session, level: TerritoryLevel = TerritoryLevel.STATE
+    request: Request,
+    session: Session,
+    level: TerritoryLevel = TerritoryLevel.STATE,
+    context: IndicatorContext = "socioeconomic",
 ) -> Response:
-    return conditional(request, await service.list_indicators(session, level))
+    return conditional(request, await service.list_indicators(session, level, context))
 
 
 @router.get(
@@ -49,11 +53,12 @@ async def values(
     level: TerritoryLevel = TerritoryLevel.STATE,
     parent: str | None = None,
     year: str = "latest",
+    context: IndicatorContext = "socioeconomic",
 ) -> Response:
     return conditional(
         request,
         await service.get_values(
-            session, level=level, parent=parent, indicator=indicator, year=year
+            session, level=level, parent=parent, indicator=indicator, year=year, context=context
         ),
     )
 
@@ -64,6 +69,10 @@ async def values(
     summary="Indicadores e proveniência de um território",
 )
 async def territory(
-    request: Request, session: Session, code: str, year: str = "latest"
+    request: Request,
+    session: Session,
+    code: str,
+    year: str = "latest",
+    context: IndicatorContext = "socioeconomic",
 ) -> Response:
-    return conditional(request, await service.get_overview(session, code, year))
+    return conditional(request, await service.get_overview(session, code, year, context))

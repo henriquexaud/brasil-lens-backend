@@ -12,6 +12,7 @@ Antes de mudar comportamento, leia [docs/invariants.md](docs/invariants.md). Vis
 | alertas: `providers/inmet`, `providers/cemaden`, `jobs/*alerts*`, `services/weather.py` | [docs/alerts.md](docs/alerts.md) |
 | focos: `providers/inpe.py`, `services/fire_*.py` | [docs/fire.md](docs/fire.md) |
 | território, `/map`, IBGE, hidrografia, migrations | [docs/geography.md](docs/geography.md) |
+| meio ambiente: `providers/prodes.py`, `providers/mapbiomas.py`, `jobs/import_environment.py` | [docs/geography.md](docs/geography.md) e o ADR-15 em [docs/decisions.md](docs/decisions.md) |
 | `api/`, `schemas/`, erros, cache (`core/`), fluxo entre repositórios | [docs/architecture.md](docs/architecture.md) e `frontend/src/api/types.ts` |
 | comandos, testes, receitas | [docs/development.md](docs/development.md) |
 | decisão com alternativas reais | [docs/decisions.md](docs/decisions.md) |

@@ -1,6 +1,6 @@
 # Focos de calor (INPE BDQueimadas)
 
-Consulta sob demanda, sem persistência, com janela padrão de 48 h. O recorte é `country`, `state` (código IBGE de 2 dígitos) ou `municipality` (7 dígitos). Código: `providers/inpe.py`, `services/fire_hotspots.py`, `fire_summary.py` e `fire_scope.py`. Testes: `test_fire_hotspots.py` e `test_fire_summary.py`.
+Consulta sob demanda, sem persistência, com janela padrão de 48 h. No mapa, os focos são a aba Fogo do contexto **Meio ambiente** (ADR-15), ao lado de Desmatamento e Florestas. O recorte é `country`, `state` (código IBGE de 2 dígitos) ou `municipality` (7 dígitos). Código: `providers/inpe.py`, `services/fire_hotspots.py`, `fire_summary.py` e `fire_scope.py`. Testes: `test_fire_hotspots.py` e `test_fire_summary.py`.
 
 ## Três rotas, uma janela
 

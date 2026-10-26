@@ -14,6 +14,7 @@ from sqlalchemy import (
     SmallInteger,
     String,
     Text,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -43,6 +44,17 @@ class Indicator(Base, TimestampMixin):
     origin: Mapped[IndicatorOrigin] = mapped_column(indicator_origin_enum, nullable=False)
     decimal_places: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     display_order: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    # Contexto do mapa que publica o indicador (ADR-15).
+    context: Mapped[str] = mapped_column(
+        String(24), nullable=False, server_default=text("'socioeconomic'")
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "context IN ('socioeconomic', 'environment')",
+            name="context",
+        ),
+    )
 
 
 class IndicatorValue(Base, TimestampMixin):

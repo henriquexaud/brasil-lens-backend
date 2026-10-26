@@ -1,5 +1,6 @@
 from dataclasses import asdict, dataclass
 from decimal import Decimal
+from typing import Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +26,10 @@ from app.schemas.socioeconomic import (
 )
 from app.services.classification import ValueDistribution, describe
 from app.services.territories import get_detail
+
+IndicatorContext = Literal["socioeconomic", "environment"]
+# Indicadores do Meio ambiente cobrem município, UF, região e Brasil (ADR-15).
+ENVIRONMENT_LEVELS = sorted(TerritoryLevel, key=lambda level: level.value)
 
 _cache: TTLCache[bytes] = TTLCache(ttl_seconds=300, max_entries=32)
 _overview_cache: TTLCache[bytes] = TTLCache(ttl_seconds=300, max_entries=64)
@@ -69,14 +74,16 @@ def supported_levels() -> dict[str, list[TerritoryLevel]]:
     return {key: sorted(value, key=lambda level: level.value) for key, value in levels.items()}
 
 
-async def list_indicators(session: AsyncSession, level: TerritoryLevel) -> IndicatorListResponse:
+async def list_indicators(
+    session: AsyncSession, level: TerritoryLevel, context: IndicatorContext = "socioeconomic"
+) -> IndicatorListResponse:
     version = await repository.version(session)
-    key = f"catalog:{level.value}:{version}"
+    key = f"catalog:{context}:{level.value}:{version}"
     cached = _cache.get(key)
     if cached is not None:
         return IndicatorListResponse.model_validate_json(cached)
     levels = supported_levels()
-    rows = await repository.catalog(session, level)
+    rows = await repository.catalog(session, level, context)
     result = IndicatorListResponse(
         version=version,
         indicators=[
@@ -89,7 +96,9 @@ async def list_indicators(session: AsyncSession, level: TerritoryLevel) -> Indic
                 decimal_places=row["decimal_places"],
                 available_years=row["available_years"],
                 latest_year=row["available_years"][-1] if row["available_years"] else None,
-                supported_levels=levels[row["key"]],
+                supported_levels=(
+                    levels[row["key"]] if context == "socioeconomic" else ENVIRONMENT_LEVELS
+                ),
             )
             for row in rows
         ],
@@ -99,7 +108,13 @@ async def list_indicators(session: AsyncSession, level: TerritoryLevel) -> Indic
 
 
 async def get_values(
-    session: AsyncSession, *, level: TerritoryLevel, parent: str | None, indicator: str, year: str
+    session: AsyncSession,
+    *,
+    level: TerritoryLevel,
+    parent: str | None,
+    indicator: str,
+    year: str,
+    context: IndicatorContext = "socioeconomic",
 ) -> MapValuesResponse:
     requested_year = parse_year(year)
     if parent:
@@ -114,7 +129,7 @@ async def get_values(
             raise InvalidParameterError(
                 "O território pai não corresponde ao nível solicitado.", parameter="parent"
             )
-    catalog = await list_indicators(session, level)
+    catalog = await list_indicators(session, level, context)
     selected = next((item for item in catalog.indicators if item.key == indicator), None)
     if selected is None:
         raise NotFoundError("Indicador socioeconômico não encontrado.", indicator=indicator)
@@ -178,17 +193,19 @@ async def get_values(
     return result
 
 
-async def get_overview(session: AsyncSession, code: str, year: str) -> TerritoryOverview:
+async def get_overview(
+    session: AsyncSession, code: str, year: str, context: IndicatorContext = "socioeconomic"
+) -> TerritoryOverview:
     target_year = parse_year(year)
     version = await repository.version(session)
     geography_version = await data_version(session)
-    key = f"overview:{version}:{geography_version}:{code}:{year}"
+    key = f"overview:{context}:{version}:{geography_version}:{code}:{year}"
     cached = _overview_cache.get(key)
     if cached is not None:
         return TerritoryOverview.model_validate_json(cached)
     detail = await get_detail(session, code)
-    catalog = await list_indicators(session, detail.level)
-    values = await repository.territory_values(session, code, target_year)
+    catalog = await list_indicators(session, detail.level, context)
+    values = await repository.territory_values(session, code, target_year, context)
     result = TerritoryOverview(
         **detail.model_dump(),
         indicators=[
