@@ -5,16 +5,19 @@ import hashlib
 import io
 import json
 import sqlite3
+import time
 import urllib.request
 import zipfile
 from collections import Counter, defaultdict
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
 BASE_URL = "https://cdn.tse.jus.br/estatistica/sead/odsele"
+LIVE_URL = "https://resultados.tse.jus.br/oficial"
 OFFICES = {
     1: "president",
     3: "governor",
@@ -85,6 +88,135 @@ def download(family: str, year: int | None, directory: Path, refresh: bool) -> P
     return target
 
 
+def fetch_json(url: str, target: Path, refresh: bool) -> tuple[Any, bytes]:
+    if refresh or not target.exists():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        request = urllib.request.Request(url, headers={"User-Agent": "BrasilLens/1.0"})
+        for attempt in range(3):
+            try:
+                with urllib.request.urlopen(request, timeout=60) as response:
+                    content = response.read()
+                break
+            except OSError:
+                if attempt == 2:
+                    raise
+                time.sleep(2 * (attempt + 1))
+        target.with_suffix(".download").write_bytes(content)
+        target.with_suffix(".download").replace(target)
+    content = target.read_bytes()
+    return json.loads(content), content
+
+
+def live_documents(
+    year: int, election_round: int, directory: Path, refresh: bool
+) -> tuple[list[tuple[str, dict[str, Any]]], dict[str, Any]]:
+    """Baixa da divulgação do TSE os resultados municipais de um turno ordinário."""
+    cache = directory / f"divulgacao_{year}_{election_round}"
+    config, _ = fetch_json(f"{LIVE_URL}/comum/config/ele-c.json", cache / "ele-c.json", True)
+    elections = [
+        election
+        for pleito in config["pl"]
+        if pleito["c"] == f"ele{year}"
+        for election in pleito["e"]
+        if election["t"] == str(election_round) and "Ordinária" in election["nm"]
+    ]
+    urls: list[tuple[str, str, Path]] = []
+    for election in elections:
+        code = f"{int(election['cd']):06d}"
+        base = f"{LIVE_URL}/ele{year}/{election['cd']}"
+        municipalities, _ = fetch_json(
+            f"{base}/config/mun-e{code}-cm.json", cache / f"mun-e{code}-cm.json", refresh
+        )
+        for scope in election["abr"]:
+            offices = [int(office["cd"]) for office in scope["cp"] if int(office["cd"]) in OFFICES]
+            for state in municipalities["abr"]:
+                if state["cd"] == "zz" or scope["cd"] not in {"br", state["cd"]}:
+                    continue
+                for municipality in state["mu"]:
+                    for office in offices:
+                        name = f"{state['cd']}{municipality['cd']}-c{office:04d}-e{code}-u.json"
+                        urls.append(
+                            (state["cd"], f"{base}/dados/{state['cd']}/{name}", cache / name)
+                        )
+    if not urls:
+        raise ValueError(f"A divulgação do TSE não tem o {election_round}º turno de {year}.")
+    digest = hashlib.sha256()
+    documents: list[tuple[str, dict[str, Any]]] = []
+    # Poucos pedidos simultâneos: são milhares de arquivos pequenos na CDN do TSE.
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for (state, _url, _path), (document, content) in zip(
+            urls, pool.map(lambda item: fetch_json(item[1], item[2], refresh), urls), strict=True
+        ):
+            digest.update(content)
+            documents.append((state, document))
+    source = {
+        "url": f"{LIVE_URL}/ele{year}/{'+'.join(e['cd'] for e in elections)}",
+        "sha256": digest.hexdigest(),
+    }
+    return documents, source
+
+
+def live_rows(state: str, document: dict[str, Any]) -> dict[str, list[dict[str, str]]]:
+    """Traduz um JSON municipal da divulgação para as colunas dos arquivos abertos."""
+    if document.get("tf") != "s":
+        raise ValueError(
+            f"Totalização incompleta na divulgação do TSE: {state}{document['cdabr']}."
+        )
+    base = {
+        "ANO_ELEICAO": document["dt"][-4:],
+        "CD_TIPO_ELEICAO": "2",
+        "SG_UF": state.upper(),
+        "CD_MUNICIPIO": document["cdabr"],
+        "NR_TURNO": document["t"],
+        "DT_GERACAO": document["dg"],
+        "HH_GERACAO": document["hg"],
+    }
+    electorate, votes = document["e"], document["v"]
+    result: dict[str, list[dict[str, str]]] = defaultdict(list)
+    for office in document["carg"]:
+        common = {**base, "CD_CARGO": office["cd"]}
+        result["detalhe_votacao_munzona"].append(
+            {
+                **common,
+                "QT_APTOS": electorate["te"],
+                "QT_COMPARECIMENTO": electorate["c"],
+                "QT_ABSTENCOES": electorate["a"],
+                "QT_VOTOS": votes["tv"],
+                "QT_TOTAL_VOTOS_VALIDOS": votes["vv"],
+                "QT_VOTOS_BRANCOS": votes["vb"],
+                "QT_TOTAL_VOTOS_NULOS": votes["tvn"],
+            }
+        )
+        for group in office["agr"]:
+            for party in group["par"]:
+                valid = 0
+                for person in party["cand"]:
+                    if not person["dvt"].startswith("Válido"):
+                        continue
+                    valid += int(person["vap"])
+                    result["votacao_candidato_munzona"].append(
+                        {
+                            **common,
+                            "SQ_CANDIDATO": person["sqcand"],
+                            "NM_URNA_CANDIDATO": person["nmu"],
+                            "NR_CANDIDATO": person["n"],
+                            "SG_PARTIDO": party["sg"],
+                            "NR_PARTIDO": party["n"],
+                            "DS_SIT_TOT_TURNO": person["st"].upper(),
+                            "QT_VOTOS_NOMINAIS_VALIDOS": person["vap"],
+                        }
+                    )
+                result["votacao_partido_munzona"].append(
+                    {
+                        **common,
+                        "SG_PARTIDO": party["sg"],
+                        "QT_VOTOS_NOMINAIS_VALIDOS": str(valid),
+                        "QT_TOTAL_VOTOS_LEG_VALIDOS": "0",
+                    }
+                )
+    return result
+
+
 class ElectionStage:
     """A votação completa vive só no disco temporário da ingestão."""
 
@@ -112,7 +244,7 @@ class ElectionStage:
                 PRIMARY KEY(office,round,code)) WITHOUT ROWID;
         """)
 
-    def ingest(self, directory: Path, refresh: bool = False) -> None:
+    def ingest(self, directory: Path, refresh: bool = False, live_round: int | None = None) -> None:
         mapping = download("municipio_tse_ibge", None, directory, refresh)
         mapping_hash = hashlib.sha256(mapping.read_bytes()).hexdigest()
         self.sources.append(
@@ -135,7 +267,38 @@ class ElectionStage:
             )
             print(f"Consolidando {path.name}…", flush=True)
             self.load_rows(family, rows(path))
+        if live_round:
+            print(f"Baixando o {live_round}º turno da divulgação do TSE…", flush=True)
+            documents, origin = live_documents(self.year, live_round, directory, refresh)
+            if self.load_live(documents):
+                self.sources.append(origin)
         self.aggregate()
+
+    def load_live(self, documents: list[tuple[str, dict[str, Any]]]) -> bool:
+        """Complementa os arquivos abertos; um cargo/turno já publicado neles prevalece."""
+        published = {
+            (office, election_round)
+            for office, election_round in self.db.execute(
+                "SELECT office,round FROM totals GROUP BY office,round HAVING SUM(totalVotes)>0"
+            )
+        }
+        families: dict[str, list[dict[str, str]]] = defaultdict(list)
+        for state, document in documents:
+            for family, items in live_rows(state, document).items():
+                families[family] += [
+                    item
+                    for item in items
+                    if (OFFICES.get(int(item["CD_CARGO"])), int(item["NR_TURNO"])) not in published
+                ]
+        if not families["detalhe_votacao_munzona"]:
+            return False
+        for family in [
+            "detalhe_votacao_munzona",
+            "votacao_partido_munzona",
+            "votacao_candidato_munzona",
+        ]:
+            self.load_rows(family, iter(families[family]))
+        return True
 
     def dimensions(self, row: dict[str, str]) -> tuple[str, int, str] | None:
         self.processed += 1

@@ -8,7 +8,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 from app.models import TerritoryLevel
-from app.providers.tse import TOTAL_FIELDS, ElectionStage, archive_files, number
+from app.providers.tse import TOTAL_FIELDS, ElectionStage, archive_files, live_rows, number
 from app.repositories import political as repository
 from app.services import political as service
 
@@ -254,6 +254,79 @@ def test_elected_status_is_preserved_when_round_rows_are_reversed(stage):
     elected = next(stage.candidate_rows())
     assert elected["elected_round"] == 2
     assert elected["data"]["status"] == "ELEITO"
+
+
+def live_document(code="00001", winner="300", final="s"):
+    def person(candidate_id, votes, status):
+        return {
+            "n": candidate_id,
+            "sqcand": candidate_id,
+            "nmu": "Candidato " + candidate_id,
+            "dvt": "Válido",
+            "st": status,
+            "vap": votes,
+        }
+
+    return {
+        "t": "2",
+        "tf": final,
+        "cdabr": code,
+        "dt": "25/10/2026",
+        "dg": "25/10/2026",
+        "hg": "23:27:02",
+        "e": {"te": "100", "c": "80", "a": "20"},
+        "v": {"tv": "80", "vv": "70", "vb": "4", "tvn": "6"},
+        "carg": [
+            {
+                "cd": "1",
+                "agr": [
+                    {"par": [{"n": "13", "sg": "PT", "cand": [person("300", "40", "Eleito")]}]},
+                    {
+                        "par": [
+                            {
+                                "n": "22",
+                                "sg": "PL",
+                                "cand": [
+                                    person("400", "30", "Não eleito"),
+                                    {**person("500", "9", "Não eleito"), "dvt": "Anulado"},
+                                ],
+                            }
+                        ]
+                    },
+                ],
+            }
+        ],
+    }
+
+
+def test_live_round_uses_open_data_columns(stage):
+    rows = live_rows("sp", live_document())
+    assert rows["detalhe_votacao_munzona"][0]["QT_TOTAL_VOTOS_NULOS"] == "6"
+    assert [item["SQ_CANDIDATO"] for item in rows["votacao_candidato_munzona"]] == ["300", "400"]
+    assert rows["votacao_partido_munzona"][1]["QT_VOTOS_NOMINAIS_VALIDOS"] == "30"
+    with pytest.raises(ValueError, match="incompleta"):
+        live_rows("sp", live_document(final="n"))
+
+    stage.load_rows("detalhe_votacao_munzona", iter([totals()]))
+    assert stage.load_live([("sp", live_document())]) is True
+    stage.aggregate()
+    assert stage.metadata()["contests"][0]["rounds"] == [1, 2]
+    national = next(
+        item
+        for item in stage.result_rows()
+        if item["round"] == 2 and item["territory_code"] == "BR"
+    )
+    assert national["data"]["leaders"] == [{"id": "300", "votes": 40}, {"id": "400", "votes": 30}]
+    assert national["data"]["validVotes"] == 70
+    assert next(stage.candidate_rows())["elected_round"] == 2
+    assert stage.updated_at is not None and stage.updated_at.day == 25
+
+
+def test_open_data_round_prevails_over_live_round(stage):
+    stage.load_rows("detalhe_votacao_munzona", iter([totals(NR_TURNO="2")]))
+    assert stage.load_live([("sp", live_document())]) is False
+    stage.aggregate()
+    assert next(stage.result_rows())["data"]["validVotes"] == 100
 
 
 @pytest.mark.db

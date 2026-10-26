@@ -138,6 +138,12 @@ async def main() -> int:
         action="store_true",
         help="Marcar o pleito como concluído após a publicação final do TSE.",
     )
+    parser.add_argument(
+        "--live-round",
+        type=int,
+        choices=[1, 2],
+        help="Complementar com o turno totalizado na divulgação do TSE ainda ausente dos arquivos.",
+    )
     args = parser.parse_args()
     async with job_session(job="import_elections", source="TSE", dataset_code=str(args.year)) as (
         session,
@@ -151,7 +157,7 @@ async def main() -> int:
         with tempfile.TemporaryDirectory(prefix="brasil-lens-election-") as directory:
             stage = ElectionStage(Path(directory) / "stage.sqlite", args.year, territories)
             try:
-                await asyncio.to_thread(stage.ingest, args.cache_dir, args.refresh)
+                await asyncio.to_thread(stage.ingest, args.cache_dir, args.refresh, args.live_round)
                 metadata = stage.metadata()
                 if args.complete:
                     metadata["status"] = "ok"
