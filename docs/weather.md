@@ -15,7 +15,7 @@ Endereço: `OPEN_METEO_URL` (padrão `https://api.open-meteo.com`). Em produçã
 | `/weather/viewport` | 1 ponto por célula de grade (1° a 0,25°, ou todos em zoom próximo), no máximo 80 | Interpolação a partir de tudo que já é conhecido |
 | `/weather/municipalities` | Cada município da página | — |
 
-Na média estadual, o céu é o código de maior peso, e a chuva usa o máximo ou "algum ponto está chovendo", para não diluir chuva local. `samplePoints` e `rainingPoints` mostram a cobertura.
+Na média estadual, o céu é o código de maior peso, e a chuva usa o máximo ou "algum ponto está chovendo", para não diluir chuva local. A umidade relativa (`humidityPct`, da mesma chamada) entra na média ponderada e no IDW como a temperatura; o vento só copia o ponto medido mais próximo, por isso não tem camada no mapa. `samplePoints` e `rainingPoints` mostram a cobertura.
 
 ## Leitura, frescor e fallback
 

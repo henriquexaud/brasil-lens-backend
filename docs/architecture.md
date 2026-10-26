@@ -2,7 +2,7 @@
 
 ## Produto
 
-Clima e meio ambiente do Brasil num mapa (país → UF → município). O contexto **Clima** mostra clima atual e previsão de 3 dias, chuva em 48 h e alertas INMET/CEMADEN, com municípios acompanhados. O contexto **Meio ambiente** mostra desmatamento anual (PRODES/INPE), cobertura florestal (MapBiomas), focos do INPE e hidrografia da ANA ([ADR-15](decisions.md)). Busca e localização valem para todos. É um produto em evolução, de dono único.
+Clima e meio ambiente do Brasil num mapa (país → UF → município). O contexto **Clima** mostra temperatura atual e previsão de 3 dias, chuva em 48 h, umidade relativa e alertas INMET/CEMADEN, com municípios acompanhados. O contexto **Meio ambiente** mostra desmatamento anual (PRODES/INPE), cobertura florestal (MapBiomas), focos do INPE e hidrografia da ANA ([ADR-15](decisions.md)). Busca e localização valem para todos. É um produto em evolução, de dono único.
 
 O contexto Socioeconômico recupera os 14 indicadores de população, economia e território do IBGE, com séries anuais. População e Economia preservam suas paletas; Outros tem uma paleta azul própria, conforme a interface documentada no frontend. O seletor tem quatro contextos e três componentes de aplicação: Clima e Meio ambiente são duas variantes da composição climática, que preserva suas consultas e regras; Socioeconômico e Política usam leituras persistidas e a geografia compartilhada ([ADR-13 e ADR-14](decisions.md)). Desmatamento e Florestas usam o mesmo motor de indicadores do Socioeconômico, filtrado por `context=environment` ([ADR-15](decisions.md)).
 
