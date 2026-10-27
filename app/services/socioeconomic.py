@@ -27,8 +27,9 @@ from app.schemas.socioeconomic import (
 from app.services.classification import ValueDistribution, describe
 from app.services.territories import get_detail
 
-IndicatorContext = Literal["socioeconomic", "environment"]
-# Indicadores do Meio ambiente cobrem município, UF, região e Brasil (ADR-15).
+IndicatorContext = Literal["socioeconomic", "environment", "education"]
+# Indicadores do Meio ambiente e da Educação cobrem município, UF, região e Brasil
+# (ADR-15 e ADR-19).
 ENVIRONMENT_LEVELS = sorted(TerritoryLevel, key=lambda level: level.value)
 
 _cache: TTLCache[bytes] = TTLCache(ttl_seconds=300, max_entries=32)

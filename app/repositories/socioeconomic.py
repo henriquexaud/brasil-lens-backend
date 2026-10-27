@@ -11,7 +11,8 @@ async def version(session: AsyncSession) -> str:
     result = await session.execute(
         text("""
         SELECT COALESCE(MAX(id), 0) FROM ingestion_runs
-         WHERE job IN ('seed_indicators', 'import_indicators', 'import_environment')
+         WHERE job IN ('seed_indicators', 'import_indicators', 'import_environment',
+                       'import_education')
            AND status = 'succeeded'
     """)
     )

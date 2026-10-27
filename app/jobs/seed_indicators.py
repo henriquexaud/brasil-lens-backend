@@ -255,6 +255,53 @@ ENVIRONMENT_CATALOG: tuple[IndicatorSeed, ...] = (
 )
 
 
+# Educação (ADR-19): matrículas de graduação presencial por município de oferta,
+# no Censo da Educação Superior do INEP. Sem oferta, o território fica sem valor.
+_EDUCATION_SOURCE = (
+    "Graduação presencial, pelo município onde o curso é oferecido (Censo da Educação "
+    "Superior, INEP). Cursos a distância não entram: o INEP não os atribui a um local "
+    "de oferta. Território sem oferta fica sem valor."
+)
+EDUCATION_CATALOG: tuple[IndicatorSeed, ...] = tuple(
+    IndicatorSeed(
+        key=f"higher_ed_{network}_enrollment",
+        name=name,
+        unit="enrollments",
+        description=f"{scope} {_EDUCATION_SOURCE}",
+        origin=IndicatorOrigin.SOURCED,
+        decimal_places=0,
+        display_order=order,
+        context="education",
+    )
+    for network, name, scope, order in (
+        (
+            "public",
+            "Matrículas no ensino superior público",
+            "Matrículas em instituições federais, estaduais e municipais.",
+            210,
+        ),
+        (
+            "federal",
+            "Matrículas em instituições federais",
+            "Matrículas em universidades, institutos federais, CEFETs e demais IES federais.",
+            220,
+        ),
+        (
+            "state",
+            "Matrículas em instituições estaduais",
+            "Matrículas em universidades e faculdades estaduais.",
+            230,
+        ),
+        (
+            "municipal",
+            "Matrículas em instituições municipais",
+            "Matrículas em universidades, centros universitários e faculdades municipais.",
+            240,
+        ),
+    )
+)
+
+
 async def seed_catalog(session: AsyncSession, catalog: tuple[IndicatorSeed, ...] = CATALOG) -> int:
     written = 0
     for seed in catalog:

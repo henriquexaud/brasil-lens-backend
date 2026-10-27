@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.v1 import (
     auth,
+    education,
     fire_hotspots,
     followed_municipalities,
     health,
@@ -28,3 +29,4 @@ api_router.include_router(weather.router)
 api_router.include_router(hydrography.router)
 api_router.include_router(fire_hotspots.router)
 api_router.include_router(transport.router)
+api_router.include_router(education.router)

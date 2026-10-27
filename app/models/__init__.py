@@ -1,3 +1,9 @@
+from app.models.education import (
+    EDUCATION_CATEGORIES,
+    EDUCATION_ORGANIZATIONS,
+    EducationInstitution,
+    EducationOffer,
+)
 from app.models.followed_municipality import FollowedMunicipality
 from app.models.indicator import Indicator, IndicatorOrigin, IndicatorValue
 from app.models.ingestion import Dataset, IngestionRun, IngestionStatus
@@ -28,10 +34,14 @@ from app.models.weather import (
 )
 
 __all__ = [
+    "EDUCATION_CATEGORIES",
+    "EDUCATION_ORGANIZATIONS",
     "EXPECTED_PARENT_LEVEL",
     "REQUIRES_PARENT",
     "TRANSPORT_LAYERS",
     "Dataset",
+    "EducationInstitution",
+    "EducationOffer",
     "FollowedMunicipality",
     "GeometryLOD",
     "Indicator",
