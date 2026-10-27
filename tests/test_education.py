@@ -259,3 +259,28 @@ async def test_routes_answer_with_etag_and_304(seeded):
         ).status_code == 422
         detail = await client.get(f"/api/v1/education/institutions/9002?year={YEAR}")
         assert detail.json()["campuses"][0]["code"] == "3550308"
+
+
+async def test_ingest_downloads_every_year_before_opening_the_transaction(monkeypatch, tmp_path):
+    from contextlib import asynccontextmanager
+
+    from app.jobs import import_education as job
+
+    events: list[str] = []
+
+    async def download(client, year, directory):
+        events.append(f"download {year}")
+        return tmp_path / f"{year}.zip"
+
+    @asynccontextmanager
+    async def session(**_):
+        events.append("transaction")
+        raise RuntimeError("parar aqui")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(job.inep, "download", download)
+    monkeypatch.setattr(job.inep, "read_census", lambda path, year: inep.Census(year=year))
+    monkeypatch.setattr(job, "job_session", session)
+    with pytest.raises(RuntimeError):
+        await job.ingest([2024, 2023], tmp_path)
+    assert events == ["download 2023", "download 2024", "transaction"]

@@ -150,6 +150,13 @@ async def _replace_year(
 async def ingest(years: Iterable[int], cache_dir: Path) -> int:
     years = sorted(set(years))
     cache_dir.mkdir(parents=True, exist_ok=True)
+    # Tudo é baixado e lido antes de abrir a transação: parada minutos à espera do
+    # zip de 2024, a conexão era derrubada pelo Neon no meio da ingestão.
+    async with inep.client() as client:
+        # Sequencial: um zip por ano, de até ~460 MB, lido em streaming.
+        censuses = [
+            inep.read_census(await inep.download(client, year, cache_dir), year) for year in years
+        ]
     async with job_session(job=JOB_NAME, source="inep") as (session, run_id, report):
         await seed_catalog(session, EDUCATION_CATALOG)
         rows = await session.execute(
@@ -163,17 +170,13 @@ async def ingest(years: Iterable[int], cache_dir: Path) -> int:
             name="INEP — Censo da Educação Superior, microdados de instituições e cursos",
             url=inep.DATASET_URL,
         )
-        async with inep.client() as client:
-            for year in years:
-                # Sequencial: um zip por ano, de até ~460 MB, lido em streaming.
-                archive = await inep.download(client, year, cache_dir)
-                census = inep.read_census(archive, year)
-                details = await _replace_year(
-                    session, census, dataset_id=dataset_id, run_id=run_id, indicators=indicators
-                )
-                report.processed += details["offers"]
-                report.written += details["values"]
-                report.details[str(year)] = details
+        for census in censuses:
+            details = await _replace_year(
+                session, census, dataset_id=dataset_id, run_id=run_id, indicators=indicators
+            )
+            report.processed += details["offers"]
+            report.written += details["values"]
+            report.details[str(census.year)] = details
         await session.commit()
     _print(report)
     return 0
