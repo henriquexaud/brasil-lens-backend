@@ -113,7 +113,28 @@ async def fetch_sources(session: AsyncSession) -> dict[str, Row[Any]]:
     result = await session.execute(
         text(
             "SELECT source, name, url FROM datasets WHERE (source, code) IN "
-            "(('dnit', 'snv/rodovias-federais'), ('ibge', 'bc250/transportes'))"
+            "(('dnit', 'snv/rodovias-federais'), ('ibge', 'bc250/transportes'), "
+            "('osm', 'geofabrik/brasil-transporte'))"
         )
     )
     return {row.source: row for row in result.all()}
+
+
+async def fetch_tiles_run(session: AsyncSession) -> Row[Any] | None:
+    """Última importação dos tiles OSM: o id vira a versão na URL dos tiles."""
+    result = await session.execute(
+        text(
+            "SELECT id, details FROM ingestion_runs "
+            "WHERE job = 'import_transport_tiles' AND status = 'succeeded' "
+            "ORDER BY id DESC LIMIT 1"
+        )
+    )
+    return result.first()
+
+
+async def fetch_tile(session: AsyncSession, zoom: int, x: int, y: int) -> bytes | None:
+    result = await session.execute(
+        text("SELECT data FROM transport_tiles WHERE zoom = :zoom AND x = :x AND y = :y"),
+        {"zoom": zoom, "x": x, "y": y},
+    )
+    return result.scalar_one_or_none()

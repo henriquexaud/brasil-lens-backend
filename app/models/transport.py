@@ -5,7 +5,17 @@ from typing import Any
 
 from geoalchemy2 import Geometry
 from geoalchemy2.elements import WKBElement
-from sqlalchemy import BigInteger, ForeignKey, Identity, Index, Numeric, SmallInteger, String
+from sqlalchemy import (
+    BigInteger,
+    ForeignKey,
+    Identity,
+    Index,
+    Integer,
+    LargeBinary,
+    Numeric,
+    SmallInteger,
+    String,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -51,3 +61,14 @@ class TransportTotal(Base):
     )
     layer: Mapped[str] = mapped_column(String(16), primary_key=True)
     value: Mapped[Decimal] = mapped_column(Numeric(14, 1), nullable=False)
+
+
+class TransportTile(Base):
+    """Tile vetorial do OpenStreetMap, em gzip, na numeração XYZ do mapa (ADR-18)."""
+
+    __tablename__ = "transport_tiles"
+
+    zoom: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
+    x: Mapped[int] = mapped_column(Integer, primary_key=True)
+    y: Mapped[int] = mapped_column(Integer, primary_key=True)
+    data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)

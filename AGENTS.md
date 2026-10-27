@@ -13,7 +13,7 @@ Antes de mudar comportamento, leia [docs/invariants.md](docs/invariants.md). Vis
 | focos: `providers/inpe.py`, `services/fire_*.py` | [docs/fire.md](docs/fire.md) |
 | território, `/map`, IBGE, hidrografia, migrations | [docs/geography.md](docs/geography.md) |
 | meio ambiente: `providers/prodes.py`, `providers/mapbiomas.py`, `jobs/import_environment.py` | [docs/geography.md](docs/geography.md) e o ADR-15 em [docs/decisions.md](docs/decisions.md) |
-| transporte: `providers/dnit.py`, `providers/bc250.py`, `providers/shapefile.py`, `jobs/import_transport.py`, `services/transport.py` | [docs/geography.md](docs/geography.md) e o ADR-17 em [docs/decisions.md](docs/decisions.md) |
+| transporte: `providers/dnit.py`, `providers/bc250.py`, `providers/shapefile.py`, `jobs/import_transport*.py`, `services/transport.py`, `scripts/transport_tiles/` | [docs/geography.md](docs/geography.md) e os ADR-17 e 18 em [docs/decisions.md](docs/decisions.md) |
 | `api/`, `schemas/`, erros, cache (`core/`), fluxo entre repositórios | [docs/architecture.md](docs/architecture.md) e `frontend/src/api/types.ts` |
 | comandos, testes, receitas | [docs/development.md](docs/development.md) |
 | decisão com alternativas reais | [docs/decisions.md](docs/decisions.md) |

@@ -17,7 +17,6 @@ from app.core.errors import InvalidParameterError, TerritoryNotFoundError
 from app.repositories import transport as repo
 from app.schemas.common import to_json
 from app.schemas.transport import (
-    StreetsLayer,
     TransportCatalog,
     TransportDetail,
     TransportFeature,
@@ -29,6 +28,7 @@ from app.schemas.transport import (
     TransportNetworkMetadata,
     TransportSource,
     TransportSummary,
+    TransportTiles,
     TransportTotal,
 )
 
@@ -52,14 +52,10 @@ LAYERS: tuple[TransportLayerInfo, ...] = (
 )
 _MIN_ZOOM = {layer.key: layer.min_zoom for layer in LAYERS}
 
-# Ruas: WMS oficial do IBGE (faces de logradouro do Censo 2022), desenhado pelo
-# navegador como o WMS do INPE (ADR-01); o estilo (SLD) fica no frontend.
-STREETS = StreetsLayer(
-    url="https://geoservicos.ibge.gov.br/geoserver/wms",
-    layer="CGMAT:qg_2022_800_facelogradouro__v00prelim",
-    min_zoom=11,
-    description="IBGE — Faces de logradouro do Censo Demográfico 2022 (versão preliminar)",
-)
+# Tiles OSM (ADR-18): a versão (id da importação) vai na URL, então cada tile
+# pode ficar em cache para sempre no navegador e na CDN.
+TILE_CACHE_CONTROL = "public, max-age=31536000, immutable"
+MAX_TILE_ZOOM = 16
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,8 +185,13 @@ async def get_catalog(session: AsyncSession) -> TransportCatalog:
     editions = {
         "dnit": f"SNV {details['snv_version']}" if details.get("snv_version") else None,
         "ibge": f"BC250 {details['bc250']}" if details.get("bc250") else None,
+        "osm": None,
     }
-    labels = {"dnit": "DNIT", "ibge": "IBGE"}
+    tiles_run = await repo.fetch_tiles_run(session)
+    tiles_details = (tiles_run.details or {}) if tiles_run else {}
+    if tiles_details.get("osm_date"):
+        editions["osm"] = f"OSM {tiles_details['osm_date']}"
+    labels = {"dnit": "DNIT", "ibge": "IBGE", "osm": "OpenStreetMap"}
     return TransportCatalog(
         version=version,
         layers=list(LAYERS),
@@ -205,8 +206,21 @@ async def get_catalog(session: AsyncSession) -> TransportCatalog:
             for key, row in sorted(rows.items())
             if key in labels
         ],
-        streets=STREETS,
+        tiles=TransportTiles(
+            url=f"/transport/tiles/{tiles_run.id}/{{z}}/{{x}}/{{y}}.pbf",
+            min_zoom=int(tiles_details.get("minzoom", 4)),
+            max_zoom=int(tiles_details.get("maxzoom", 13)),
+            description=rows["osm"].name if "osm" in rows else "OpenStreetMap",
+        )
+        if tiles_run
+        else None,
     )
+
+
+async def get_tile(session: AsyncSession, zoom: int, x: int, y: int) -> bytes | None:
+    if not (0 <= zoom <= MAX_TILE_ZOOM and 0 <= x < 1 << zoom and 0 <= y < 1 << zoom):
+        raise InvalidParameterError("Tile fora da grade do mapa.", "tile")
+    return await repo.fetch_tile(session, zoom, x, y)
 
 
 async def get_summary(session: AsyncSession, code: str) -> TransportSummary:

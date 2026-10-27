@@ -38,7 +38,7 @@ class TransportIdentify(CamelModel):
 
 
 class TransportSource(CamelModel):
-    key: Literal["dnit", "ibge"]
+    key: Literal["dnit", "ibge", "osm"]
     label: str
     edition: str | None = None
     description: str
@@ -52,10 +52,12 @@ class TransportLayerInfo(CamelModel):
     min_zoom: float
 
 
-class StreetsLayer(CamelModel):
+class TransportTiles(CamelModel):
+    """Tiles vetoriais OSM; `url` é relativo à API e leva a versão como cache."""
+
     url: str
-    layer: str
-    min_zoom: float
+    min_zoom: int
+    max_zoom: int
     description: str
 
 
@@ -63,7 +65,7 @@ class TransportCatalog(CamelModel):
     version: int
     layers: list[TransportLayerInfo]
     sources: list[TransportSource]
-    streets: StreetsLayer
+    tiles: TransportTiles | None
 
 
 class TransportTotal(CamelModel):

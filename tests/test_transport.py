@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 import struct
 import zipfile
 from pathlib import Path
@@ -11,6 +12,7 @@ import respx
 from sqlalchemy import text
 
 from app.core.errors import InvalidParameterError, ProviderError
+from app.jobs import import_transport_tiles
 from app.providers import bc250, dnit
 from app.providers.shapefile import read_dbf, read_shapes, wkb_multilinestring
 from app.services import transport as service
@@ -308,3 +310,50 @@ async def test_identify_returns_the_nearest_segment_within_tolerance(network):
     assert found.feature.name == "Ferrovia Teste"
     assert found.feature.attributes == {"gauge": "Larga"}
     assert missed.feature is None
+
+
+def _mbtiles(path: Path, tiles: list[tuple[int, int, int, bytes]]) -> sqlite3.Connection:
+    connection = sqlite3.connect(path)
+    connection.execute("CREATE TABLE metadata (name TEXT, value TEXT)")
+    connection.execute(
+        "CREATE TABLE tiles (zoom_level INT, tile_column INT, tile_row INT, tile_data BLOB)"
+    )
+    connection.executemany(
+        "INSERT INTO metadata VALUES (?, ?)",
+        [("format", "pbf"), ("planetiler:osm:osmosisreplicationtime", "2026-10-25T20:21:02Z")],
+    )
+    connection.executemany("INSERT INTO tiles VALUES (?, ?, ?, ?)", tiles)
+    return connection
+
+
+def test_mbtiles_rows_are_flipped_from_tms_to_xyz(tmp_path: Path):
+    connection = _mbtiles(tmp_path / "t.mbtiles", [(0, 0, 0, b"a"), (3, 2, 0, b"b")])
+
+    rows = [row for batch in import_transport_tiles.tile_batches(connection, 1) for row in batch]
+
+    assert rows == [
+        {"zoom": 0, "x": 0, "y": 0, "data": b"a"},
+        {"zoom": 3, "x": 2, "y": 7, "data": b"b"},  # linha 0 do TMS é a última no XYZ
+    ]
+    assert import_transport_tiles.osm_date(import_transport_tiles.read_metadata(connection)) == (
+        "2026-10-25"
+    )
+
+
+async def test_tile_outside_the_grid_is_rejected():
+    with pytest.raises(InvalidParameterError):
+        await service.get_tile(None, 3, 8, 0)  # type: ignore[arg-type]
+    with pytest.raises(InvalidParameterError):
+        await service.get_tile(None, 17, 0, 0)  # type: ignore[arg-type]
+
+
+@pytest.mark.db
+async def test_tiles_are_read_by_key_and_missing_tiles_are_empty(session):
+    await session.execute(text("DELETE FROM transport_tiles"))
+    await session.execute(
+        text("INSERT INTO transport_tiles (zoom, x, y, data) VALUES (5, 11, 16, :data)"),
+        {"data": b"\x1f\x8b-gzip"},
+    )
+
+    assert await service.get_tile(session, 5, 11, 16) == b"\x1f\x8b-gzip"
+    assert await service.get_tile(session, 5, 11, 17) is None

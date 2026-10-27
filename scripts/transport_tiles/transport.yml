@@ -1,0 +1,147 @@
+# Tiles vetoriais do contexto Transporte (ADR-18): só o que é transporte no
+# OpenStreetMap do Brasil, já recortado à fronteira por build.sh. Nada de
+# prédios, uso do solo, comércio ou rótulos que não sejam de vias.
+schema_name: Brasil Lens — Transporte
+schema_description: Vias, ciclovias, ferrovias, estações e balsas do OpenStreetMap no Brasil
+attribution: <a href="https://www.openstreetmap.org/copyright" target="_blank">&copy; OpenStreetMap</a>
+sources:
+  osm:
+    type: osm
+    local_path: /data/brazil-transport.osm.pbf
+layers:
+  - id: roads
+    features:
+      - source: osm
+        geometry: line
+        include_when:
+          highway:
+            - motorway
+            - motorway_link
+            - trunk
+            - trunk_link
+            - primary
+            - primary_link
+            - secondary
+            - secondary_link
+            - tertiary
+            - tertiary_link
+            - unclassified
+            - residential
+            - living_street
+            - road
+        exclude_when:
+          area: "yes"
+        # Do nacional à rua: a hierarquia entra aos poucos, como num mapa rodoviário.
+        min_zoom:
+          default_value: 12
+          overrides:
+            4:
+              highway: [motorway, trunk]
+            7:
+              highway: primary
+            9:
+              highway: [secondary, motorway_link, trunk_link]
+            10:
+              highway: [tertiary, primary_link]
+            11:
+              highway: [secondary_link, tertiary_link]
+        attributes:
+          - key: class
+            tag_value: highway
+          - key: ref
+            min_zoom: 4
+          - key: name
+            min_zoom: 11
+          - key: surface
+            min_zoom: 10
+    # Trechos vizinhos com os mesmos atributos viram uma linha só: sem isso, nos
+    # zooms baixos os trechos curtos somem e a rodovia aparece picotada.
+    tile_post_process:
+      merge_line_strings:
+        min_length: 0.5
+        tolerance: 0.4
+        buffer: 4
+  - id: cycle
+    features:
+      - source: osm
+        geometry: line
+        min_zoom: 11
+        include_when:
+          highway: cycleway
+        attributes:
+          - key: class
+            value: cycleway
+          - key: name
+            min_zoom: 12
+      # Ciclofaixa pintada numa rua: a rua inteira leva a marca.
+      - source: osm
+        geometry: line
+        min_zoom: 11
+        include_when:
+          cycleway: [lane, track, opposite_lane, opposite_track]
+          cycleway:both: [lane, track]
+          cycleway:left: [lane, track]
+          cycleway:right: [lane, track]
+        exclude_when:
+          highway: cycleway
+        attributes:
+          - key: class
+            value: lane
+          - key: name
+            min_zoom: 12
+    tile_post_process:
+      merge_line_strings:
+        min_length: 0.5
+        tolerance: 0.4
+        buffer: 4
+  - id: rail
+    features:
+      - source: osm
+        geometry: line
+        include_when:
+          railway: [rail, narrow_gauge, light_rail, subway, tram, monorail, funicular]
+        min_zoom:
+          default_value: 5
+          overrides:
+            9:
+              railway: [light_rail, subway, monorail]
+            11:
+              railway: [tram, funicular]
+            12:
+              service: [yard, siding, spur, crossover]
+        attributes:
+          - key: class
+            tag_value: railway
+          - key: usage
+          - key: service
+            min_zoom: 12
+          - key: name
+            min_zoom: 9
+          - key: operator
+            min_zoom: 9
+    tile_post_process:
+      merge_line_strings:
+        min_length: 0.5
+        tolerance: 0.4
+        buffer: 4
+  - id: stations
+    features:
+      - source: osm
+        geometry: point
+        min_zoom: 11
+        include_when:
+          railway: [station, halt]
+        attributes:
+          - key: name
+          - key: station
+          - key: network
+  - id: ferry
+    features:
+      - source: osm
+        geometry: line
+        min_zoom: 6
+        include_when:
+          route: ferry
+        attributes:
+          - key: name
+            min_zoom: 9

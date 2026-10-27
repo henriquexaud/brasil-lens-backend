@@ -15,6 +15,7 @@ from app.models.transport import (
     TRANSPORT_LAYERS,
     TransportFeature,
     TransportOverview,
+    TransportTile,
     TransportTotal,
 )
 from app.models.user import User, UserSession
@@ -49,6 +50,7 @@ __all__ = [
     "TerritoryLevel",
     "TransportFeature",
     "TransportOverview",
+    "TransportTile",
     "TransportTotal",
     "User",
     "UserSession",

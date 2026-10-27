@@ -78,3 +78,18 @@ async def identify(
 )
 async def summary(request: Request, session: Session, code: str) -> Response:
     return conditional(request, to_json(await service.get_summary(session, code)))
+
+
+@router.get(
+    "/tiles/{version}/{zoom}/{x}/{y}.pbf",
+    summary="Tile vetorial (MVT, gzip) da malha de transporte do OpenStreetMap",
+    response_class=Response,
+)
+async def tile(session: Session, version: int, zoom: int, x: int, y: int) -> Response:
+    # A versão só muda a URL (cache); o banco guarda uma importação por vez.
+    data = await service.get_tile(session, zoom, x, y)
+    headers = {"Cache-Control": service.TILE_CACHE_CONTROL}
+    if data is None:
+        return Response(status_code=204, headers=headers)
+    headers["Content-Encoding"] = "gzip"
+    return Response(data, media_type="application/vnd.mapbox-vector-tile", headers=headers)
