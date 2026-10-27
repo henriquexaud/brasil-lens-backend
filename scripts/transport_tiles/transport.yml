@@ -32,11 +32,16 @@ layers:
         exclude_when:
           area: "yes"
         # Do nacional à rua: a hierarquia entra aos poucos, como num mapa rodoviário.
+        # Federais (BR-) e estaduais (sigla da UF) entram antes da classe delas, para
+        # as pílulas Federais e Estaduais terem a rede inteira já nas vistas de longe.
         min_zoom:
           default_value: 12
           overrides:
             4:
               highway: [motorway, trunk]
+              ref: "BR-%"
+            5:
+              ref: __any__
             7:
               highway: primary
             9:
@@ -101,7 +106,7 @@ layers:
         include_when:
           railway: [rail, narrow_gauge, light_rail, subway, tram, monorail, funicular]
         min_zoom:
-          default_value: 5
+          default_value: 4
           overrides:
             9:
               railway: [light_rail, subway, monorail]
