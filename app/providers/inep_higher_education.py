@@ -43,6 +43,15 @@ ORGANIZATIONS = {
     "4": "federal_institute",
     "5": "cefet",
 }
+# O filtro do mapa junta as organizações em três tipos: os CEFETs com os
+# institutos federais, e os centros universitários com as faculdades.
+KINDS = {
+    "university": "university",
+    "federal_institute": "institute",
+    "cefet": "institute",
+    "university_center": "college",
+    "college": "college",
+}
 # O servidor do INEP não envia o certificado intermediário da RNP (o navegador o
 # busca pelo AIA; o Python, não). A cadeia continua validada até a raiz
 # GlobalSign R46 do certifi; o intermediário vale até 2030-11-19.

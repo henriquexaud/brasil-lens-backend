@@ -2,7 +2,9 @@ from typing import Literal
 
 from app.schemas.common import CamelModel
 
-EducationNetwork = Literal["public", "federal", "state", "municipal"]
+EducationNetwork = Literal["federal", "state", "municipal"]
+# Filtro do mapa: universidades, institutos federais e CEFETs, faculdades e centros.
+EducationKind = Literal["all", "university", "institute", "college"]
 EducationCategory = Literal["federal", "state", "municipal"]
 EducationOrganization = Literal[
     "university", "university_center", "college", "federal_institute", "cefet"
@@ -37,6 +39,7 @@ class EducationTerritory(CamelModel):
     year: int | None
     available_years: list[int]
     network: EducationNetwork
+    kind: EducationKind
     enrollment: int | None
     courses: int | None
     institutions: list[EducationInstitutionSummary]

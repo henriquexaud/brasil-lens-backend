@@ -262,44 +262,36 @@ _EDUCATION_SOURCE = (
     "Superior, INEP). Cursos a distância não entram: o INEP não os atribui a um local "
     "de oferta. Território sem oferta fica sem valor."
 )
+_EDUCATION_NETWORKS = (
+    ("federal", "federais", 220),
+    ("state", "estaduais", 230),
+    ("municipal", "municipais", 240),
+)
+_EDUCATION_KINDS = (
+    ("", "instituições", "Todas as instituições da rede."),
+    ("university_", "universidades", "Só universidades."),
+    ("institute_", "institutos", "Só institutos federais e CEFETs."),
+    ("college_", "faculdades", "Faculdades e centros universitários."),
+)
+# Uma rede (o switch) por tipo de instituição (o filtro): a chave sem tipo é a
+# rede inteira. Combinação sem oferta, como instituto estadual, fica sem anos e
+# o frontend esconde o filtro.
 EDUCATION_CATALOG: tuple[IndicatorSeed, ...] = tuple(
     IndicatorSeed(
-        key=f"higher_ed_{network}_enrollment",
-        name=name,
+        key=f"higher_ed_{network}_{kind}enrollment",
+        name=f"Matrículas em {label} {adjective}",
         unit="enrollments",
         description=f"{scope} {_EDUCATION_SOURCE}",
         origin=IndicatorOrigin.SOURCED,
         decimal_places=0,
-        display_order=order,
+        display_order=order + index,
         context="education",
     )
-    for network, name, scope, order in (
-        (
-            "public",
-            "Matrículas no ensino superior público",
-            "Matrículas em instituições federais, estaduais e municipais.",
-            210,
-        ),
-        (
-            "federal",
-            "Matrículas em instituições federais",
-            "Matrículas em universidades, institutos federais, CEFETs e demais IES federais.",
-            220,
-        ),
-        (
-            "state",
-            "Matrículas em instituições estaduais",
-            "Matrículas em universidades e faculdades estaduais.",
-            230,
-        ),
-        (
-            "municipal",
-            "Matrículas em instituições municipais",
-            "Matrículas em universidades, centros universitários e faculdades municipais.",
-            240,
-        ),
-    )
+    for network, adjective, order in _EDUCATION_NETWORKS
+    for index, (kind, label, scope) in enumerate(_EDUCATION_KINDS)
 )
+# Rede retirada do mapa: a ingestão apaga o indicador e os valores dele.
+RETIRED_EDUCATION_KEYS = ("higher_ed_public_enrollment",)
 
 
 async def seed_catalog(session: AsyncSession, catalog: tuple[IndicatorSeed, ...] = CATALOG) -> int:

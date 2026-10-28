@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.results import affected_rows
 from app.jobs._runner import RunReport, job_session, run_job, upsert_dataset
 from app.jobs.import_indicators import persist
-from app.jobs.seed_indicators import EDUCATION_CATALOG, seed_catalog
+from app.jobs.seed_indicators import EDUCATION_CATALOG, RETIRED_EDUCATION_KEYS, seed_catalog
 from app.models import EducationInstitution, Indicator, IndicatorValue
 from app.providers import inep_higher_education as inep
 from app.providers.ibge.indicator_records import IndicatorObservation
@@ -27,7 +27,6 @@ from app.providers.ibge.indicator_records import IndicatorObservation
 JOB_NAME = "import_education"
 DEFAULT_YEARS = tuple(range(2019, 2025))
 DEFAULT_CACHE = Path("/tmp/brasil-lens-inep")
-NETWORKS = ("public", "federal", "state", "municipal")
 COUNTRY_CODE = "BR"
 
 INSERT_INSTITUTIONS_SQL = text("""
@@ -64,13 +63,21 @@ def _scopes(code: str) -> tuple[str, ...]:
 
 
 def enrollment_totals(census: inep.Census) -> dict[str, dict[str, int]]:
-    """Matrículas por rede e território. Só entra o território que tem oferta da rede."""
-    totals: dict[str, dict[str, int]] = {network: {} for network in NETWORKS}
+    """Matrículas por indicador e território: a rede inteira e a rede por tipo.
+
+    Só entra o território que tem oferta; os indicadores sem nenhuma ficam vazios.
+    """
+    totals: dict[str, dict[str, int]] = {seed.key: {} for seed in EDUCATION_CATALOG}
     for (code, municipality), offer in census.offers.items():
-        category = census.institutions[code].category
-        for network in ("public", category):
+        institution = census.institutions[code]
+        network = institution.category
+        kind = inep.KINDS[institution.organization]
+        for key in (
+            f"higher_ed_{network}_enrollment",
+            f"higher_ed_{network}_{kind}_enrollment",
+        ):
             for scope in _scopes(municipality):
-                totals[network][scope] = totals[network].get(scope, 0) + offer.enrollment
+                totals[key][scope] = totals[key].get(scope, 0) + offer.enrollment
     return totals
 
 
@@ -124,8 +131,8 @@ async def _replace_year(
         )
     )
     written = 0
-    for network, values in enrollment_totals(census).items():
-        indicator_id = indicators[f"higher_ed_{network}_enrollment"]
+    for key, values in enrollment_totals(census).items():
+        indicator_id = indicators[key]
         await session.execute(
             delete(IndicatorValue).where(
                 IndicatorValue.indicator_id == indicator_id, IndicatorValue.reference_year == year
@@ -158,6 +165,7 @@ async def ingest(years: Iterable[int], cache_dir: Path) -> int:
             inep.read_census(await inep.download(client, year, cache_dir), year) for year in years
         ]
     async with job_session(job=JOB_NAME, source="inep") as (session, run_id, report):
+        await session.execute(delete(Indicator).where(Indicator.key.in_(RETIRED_EDUCATION_KEYS)))
         await seed_catalog(session, EDUCATION_CATALOG)
         rows = await session.execute(
             select(Indicator.key, Indicator.id).where(Indicator.context == "education")

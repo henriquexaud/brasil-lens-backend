@@ -34,7 +34,12 @@ async def fetch_territory(session: AsyncSession, code: str) -> Row[Any] | None:
 
 
 async def fetch_institutions_in(
-    session: AsyncSession, *, year: int, prefix: str, category: str | None
+    session: AsyncSession,
+    *,
+    year: int,
+    prefix: str,
+    category: str,
+    organizations: list[str] | None,
 ) -> list[Row[Any]]:
     """Instituições com oferta em municípios cujo código começa por `prefix`.
 
@@ -53,12 +58,14 @@ async def fetch_institutions_in(
           LEFT JOIN territories s ON s.id = i.seat_territory_id
           LEFT JOIN territories sp ON sp.id = s.parent_id
          WHERE o.year = :year AND m.ibge_code LIKE :prefix || '%'
-           AND (CAST(:category AS text) IS NULL OR i.category = :category)
+           AND i.category = :category
+           AND (CAST(:organizations AS text[]) IS NULL
+                OR i.organization = ANY(CAST(:organizations AS text[])))
          GROUP BY i.code, i.name, i.acronym, i.category, i.organization,
                   s.ibge_code, s.name, sp.abbreviation
          ORDER BY enrollment DESC, i.name
     """),
-        {"year": year, "prefix": prefix, "category": category},
+        {"year": year, "prefix": prefix, "category": category, "organizations": organizations},
     )
     return list(result.all())
 

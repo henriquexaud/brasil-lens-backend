@@ -14,12 +14,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cache import TTLCache
 from app.core.errors import InvalidParameterError, NotFoundError, TerritoryNotFoundError
+from app.providers.inep_higher_education import KINDS
 from app.repositories import education as repo
 from app.schemas.common import to_json
 from app.schemas.education import (
     EducationCampus,
     EducationInstitutionDetail,
     EducationInstitutionSummary,
+    EducationKind,
     EducationNetwork,
     EducationPlace,
     EducationTerritory,
@@ -54,10 +56,14 @@ async def _resolve_year(session: AsyncSession, year: str) -> tuple[int | None, l
 
 
 async def get_territory(
-    session: AsyncSession, code: str, year: str, network: EducationNetwork
+    session: AsyncSession,
+    code: str,
+    year: str,
+    network: EducationNetwork,
+    kind: EducationKind = "all",
 ) -> bytes:
     version = await repo.fetch_version(session)
-    key = f"territory:{version}:{code}:{year}:{network}"
+    key = f"territory:{version}:{code}:{year}:{network}:{kind}"
     cached = _cache.get(key)
     if cached is not None:
         return cached
@@ -70,7 +76,12 @@ async def get_territory(
             session,
             year=resolved,
             prefix="" if code == COUNTRY_CODE else code,
-            category=None if network == "public" else network,
+            category=network,
+            organizations=(
+                None
+                if kind == "all"
+                else [organization for organization, item in KINDS.items() if item == kind]
+            ),
         )
         if resolved is not None
         else []
@@ -81,6 +92,7 @@ async def get_territory(
         year=resolved,
         available_years=years,
         network=network,
+        kind=kind,
         # Sem oferta presencial da rede no território: ausência, não zero (ADR-19).
         enrollment=sum(row.enrollment for row in rows) if rows else None,
         courses=sum(row.courses for row in rows) if rows else None,

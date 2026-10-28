@@ -8,6 +8,7 @@ from app.api.deps import get_session
 from app.api.http import etag_matches
 from app.schemas.education import (
     EducationInstitutionDetail,
+    EducationKind,
     EducationNetwork,
     EducationTerritory,
 )
@@ -37,9 +38,10 @@ async def territory(
     session: Session,
     code: str,
     year: str = "latest",
-    network: EducationNetwork = "public",
+    network: EducationNetwork = "federal",
+    kind: EducationKind = "all",
 ) -> Response:
-    return conditional(request, await service.get_territory(session, code, year, network))
+    return conditional(request, await service.get_territory(session, code, year, network, kind))
 
 
 @router.get(

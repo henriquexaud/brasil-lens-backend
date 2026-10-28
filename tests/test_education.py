@@ -107,35 +107,48 @@ def test_census_without_public_offers_is_a_provider_error(tmp_path):
         inep.read_census(path, 2024)
 
 
-def test_totals_add_up_by_network_and_skip_territories_without_offer():
+def test_totals_add_up_by_network_and_kind_and_skip_territories_without_offer():
     census = inep.Census(year=2024)
-    for code, category in ((10, "federal"), (20, "state")):
+    for code, category, organization in (
+        (10, "federal", "university"),
+        (11, "federal", "cefet"),
+        (20, "state", "university_center"),
+    ):
         census.institutions[code] = inep.Institution(
             code=code,
             name=str(code),
             acronym=None,
             category=category,
-            organization="university",
+            organization=organization,
             seat_code=None,
             faculty=None,
             staff=None,
         )
     census.offers[(10, "3106200")] = inep.Offer(enrollment=150)
     census.offers[(10, "3143302")] = inep.Offer(enrollment=0)
+    census.offers[(11, "3106200")] = inep.Offer(enrollment=30)
     census.offers[(20, "3550308")] = inep.Offer(enrollment=200)
     totals = enrollment_totals(census)
-    assert totals["public"] == {
-        "3106200": 150,
+    assert totals["higher_ed_federal_enrollment"] == {
+        "3106200": 180,
         "3143302": 0,
-        "3550308": 200,
-        "31": 150,
-        "35": 200,
-        "3": 350,
-        "BR": 350,
+        "31": 180,
+        "3": 180,
+        "BR": 180,
     }
-    assert totals["federal"] == {"3106200": 150, "3143302": 0, "31": 150, "3": 150, "BR": 150}
-    assert "3106200" not in totals["state"]
-    assert totals["municipal"] == {}
+    assert totals["higher_ed_federal_university_enrollment"]["BR"] == 150
+    # CEFET entra com os institutos; centro universitário, com as faculdades.
+    assert totals["higher_ed_federal_institute_enrollment"] == {
+        "3106200": 30,
+        "31": 30,
+        "3": 30,
+        "BR": 30,
+    }
+    assert totals["higher_ed_state_college_enrollment"]["35"] == 200
+    assert "3106200" not in totals["higher_ed_state_enrollment"]
+    assert totals["higher_ed_municipal_enrollment"] == {}
+    assert totals["higher_ed_state_institute_enrollment"] == {}
+    assert "higher_ed_public_enrollment" not in totals
 
 
 # --- Banco -------------------------------------------------------------------
@@ -200,26 +213,41 @@ async def seeded(session: AsyncSession) -> AsyncSession:
 @pytest.mark.db
 @pytest.mark.ingested
 async def test_territory_lists_institutions_with_offer_inside_it(seeded):
-    body = orjson.loads(await service.get_territory(seeded, "31", str(YEAR), "public"))
+    body = orjson.loads(await service.get_territory(seeded, "31", str(YEAR), "federal"))
     assert body["year"] == YEAR
-    assert [item["code"] for item in body["institutions"]] == [9001, 9002]
+    assert [item["code"] for item in body["institutions"]] == [9001]
     federal = body["institutions"][0]
     # Só as ofertas dentro de MG: 2 municípios, 340 matrículas.
     assert (federal["enrollment"], federal["municipalities"], federal["courses"]) == (340, 2, 4)
     assert federal["seat"] == {"code": "3106200", "name": "Belo Horizonte", "state": "MG"}
-    assert body["enrollment"] == 350
+    assert body["enrollment"] == 340
 
     state = orjson.loads(await service.get_territory(seeded, "31", str(YEAR), "state"))
     assert [item["code"] for item in state["institutions"]] == [9002]
 
-    country = orjson.loads(await service.get_territory(seeded, "BR", str(YEAR), "public"))
-    assert country["enrollment"] == 850
+    country = orjson.loads(await service.get_territory(seeded, "BR", str(YEAR), "state"))
+    assert country["enrollment"] == 510
+
+
+@pytest.mark.db
+@pytest.mark.ingested
+async def test_territory_filters_institutions_by_kind(seeded):
+    universities = orjson.loads(
+        await service.get_territory(seeded, "BR", str(YEAR), "federal", "university")
+    )
+    assert universities["kind"] == "university"
+    assert [item["code"] for item in universities["institutions"]] == [9001]
+    colleges = orjson.loads(
+        await service.get_territory(seeded, "BR", str(YEAR), "federal", "college")
+    )
+    assert colleges["institutions"] == []
+    assert colleges["enrollment"] is None
 
 
 @pytest.mark.db
 @pytest.mark.ingested
 async def test_territory_without_offer_has_no_enrollment_instead_of_zero(seeded):
-    body = orjson.loads(await service.get_territory(seeded, "1100015", str(YEAR), "public"))
+    body = orjson.loads(await service.get_territory(seeded, "1100015", str(YEAR), "federal"))
     assert body["institutions"] == []
     assert body["enrollment"] is None
 
@@ -239,7 +267,7 @@ async def test_institution_detail_lists_campuses_by_enrollment(seeded):
 @pytest.mark.ingested
 async def test_year_without_census_is_rejected(seeded):
     with pytest.raises(InvalidParameterError):
-        await service.get_territory(seeded, "BR", "1950", "public")
+        await service.get_territory(seeded, "BR", "1950", "federal")
 
 
 @pytest.mark.db
@@ -255,7 +283,10 @@ async def test_routes_answer_with_etag_and_304(seeded):
         )
         assert again.status_code == 304
         assert (
-            await client.get("/api/v1/education/territories/31?network=private")
+            await client.get("/api/v1/education/territories/31?network=public")
+        ).status_code == 422
+        assert (
+            await client.get("/api/v1/education/territories/31?kind=private")
         ).status_code == 422
         detail = await client.get(f"/api/v1/education/institutions/9002?year={YEAR}")
         assert detail.json()["campuses"][0]["code"] == "3550308"
