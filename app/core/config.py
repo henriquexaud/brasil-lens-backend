@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     push_notifications_enabled: bool = False
     vapid_public_key: str = ""
     vapid_private_key: SecretStr | None = None
-    vapid_subject: str = "https://brasil-lens.vercel.app"
+    vapid_subject: str = "https://www.brasillens.com.br"
     notification_batch_limit: int = Field(default=500, ge=1, le=1000)
 
     inpe_queimadas_wfs_url: str = "https://data.inpe.br/queimadas/geoserver/wfs"
