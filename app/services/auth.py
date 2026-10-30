@@ -39,9 +39,9 @@ async def _start_session(
 
 
 async def register(
-    session: AsyncSession, body: RegisterRequest, old_token: str | None
+    session: AsyncSession, body: RegisterRequest, old_token: str | None, ip: str | None = None
 ) -> tuple[UserOut, str]:
-    security.check_auth_attempt(body.email)
+    security.check_auth_attempt(body.email, ip)
     password_hash = await run_in_threadpool(security.hash_password, body.password)
     user = await users.create(
         session,
@@ -55,14 +55,14 @@ async def register(
     )
     if user is None:
         raise ConflictError("Este e-mail já está cadastrado. Entre na sua conta.")
-    security.clear_auth_attempts(body.email)
+    security.clear_auth_attempts(body.email, ip)
     return await _start_session(session, user, old_token)
 
 
 async def login(
-    session: AsyncSession, body: LoginRequest, old_token: str | None
+    session: AsyncSession, body: LoginRequest, old_token: str | None, ip: str | None = None
 ) -> tuple[UserOut, str]:
-    security.check_auth_attempt(body.email)
+    security.check_auth_attempt(body.email, ip)
     user = await users.by_email(session, body.email)
     valid = await run_in_threadpool(
         security.verify_password,
@@ -71,7 +71,7 @@ async def login(
     )
     if user is None or not valid:
         raise AuthenticationError("E-mail ou senha incorretos.")
-    security.clear_auth_attempts(body.email)
+    security.clear_auth_attempts(body.email, ip)
     return await _start_session(session, user, old_token)
 
 

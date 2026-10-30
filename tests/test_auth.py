@@ -63,6 +63,36 @@ def test_auth_attempts_are_limited_and_reset_after_success() -> None:
     security.check_auth_attempt("alguem@exemplo.com")
 
 
+def test_failures_from_one_ip_do_not_lock_the_account_for_another() -> None:
+    for _ in range(security.ACCOUNT_LIMIT):
+        security.check_auth_attempt("vitima@exemplo.com", "198.51.100.1")
+    with pytest.raises(AuthRateLimitedError):
+        security.check_auth_attempt("vitima@exemplo.com", "198.51.100.1")
+    security.check_auth_attempt("vitima@exemplo.com", "203.0.113.7")
+
+
+def test_one_ip_cannot_spray_many_emails_nor_evict_other_counters() -> None:
+    for number in range(security.IP_LIMIT):
+        security.check_auth_attempt(f"alvo{number}@exemplo.com", "198.51.100.2")
+    with pytest.raises(AuthRateLimitedError):
+        security.check_auth_attempt("outro@exemplo.com", "198.51.100.2")
+    security.check_auth_attempt("outro@exemplo.com", "203.0.113.8")
+
+
+def test_the_window_is_fixed_so_insisting_does_not_extend_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = 1000.0
+    monkeypatch.setattr("time.monotonic", lambda: now)
+    for _ in range(security.ACCOUNT_LIMIT):
+        security.check_auth_attempt("fixa@exemplo.com", "198.51.100.3")
+        now += 25
+    with pytest.raises(AuthRateLimitedError):
+        security.check_auth_attempt("fixa@exemplo.com", "198.51.100.3")
+    now += security.WINDOW_SECONDS - 250 + 1
+    security.check_auth_attempt("fixa@exemplo.com", "198.51.100.3")
+
+
 async def test_private_routes_require_authentication() -> None:
     async with _api() as client:
         for path in ("/auth/me", "/me/followed-municipalities"):

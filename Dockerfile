@@ -27,5 +27,8 @@ RUN python -c "import tomllib; p = tomllib.load(open('pyproject.toml', 'rb'))['p
     pip install -r /tmp/dev-requirements.txt
 COPY tests ./tests
 
-# Target padrão: apenas código, migrations e dependências de execução.
+# Target padrão: apenas código, migrations e dependências de execução, sem root. O target
+# `development` segue como root porque monta o código do host.
 FROM base AS production
+RUN useradd --system --uid 10001 --home-dir /app app && chown -R app /app
+USER app

@@ -15,6 +15,10 @@ WriteSession = Annotated[AsyncSession, Depends(get_write_session)]
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
+def _client_ip(request: Request) -> str | None:
+    return request.client.host if request.client else None
+
+
 def _set_session(response: Response, token: str) -> None:
     response.set_cookie(
         SESSION_COOKIE,
@@ -34,7 +38,9 @@ def _set_session(response: Response, token: str) -> None:
 async def register(
     body: RegisterRequest, request: Request, response: Response, session: WriteSession
 ) -> UserOut:
-    user, token = await auth.register(session, body, request.cookies.get(SESSION_COOKIE))
+    user, token = await auth.register(
+        session, body, request.cookies.get(SESSION_COOKIE), _client_ip(request)
+    )
     _set_session(response, token)
     return user
 
@@ -43,7 +49,9 @@ async def register(
 async def login(
     body: LoginRequest, request: Request, response: Response, session: WriteSession
 ) -> UserOut:
-    user, token = await auth.login(session, body, request.cookies.get(SESSION_COOKIE))
+    user, token = await auth.login(
+        session, body, request.cookies.get(SESSION_COOKIE), _client_ip(request)
+    )
     _set_session(response, token)
     return user
 

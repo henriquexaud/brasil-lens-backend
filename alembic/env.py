@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from logging.config import fileConfig
 
+from sqlalchemy import text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 from sqlalchemy.pool import NullPool
@@ -49,6 +50,9 @@ def _do_run_migrations(connection: Connection) -> None:
         include_object=_include_object,
     )
     with context.begin_transaction():
+        # Duas instâncias subindo juntas (cada uma migra ao iniciar) esperam aqui em vez de
+        # correr; o lock cai no commit, e a segunda encontra o banco já no `head`.
+        connection.execute(text("SELECT pg_advisory_xact_lock(1862743022)"))
         context.run_migrations()
 
 
