@@ -6,7 +6,7 @@ Consulta sob demanda, sem persistência, com janela padrão de 48 h. No mapa, os
 
 - `GET /fire-hotspots` faz um WFS com `count=1` e devolve a metadata: total, detecção mais recente, janela, `wmsUrl`, `wmsLayer` e o `cqlFilter`. O navegador desenha os pontos pelo WMS do INPE com **esse** filtro.
 - `GET /fire-hotspots/summary?at=` pagina o WFS em CSV (10 mil por página, 4 em paralelo) e agrega por município e UF: densidade = focos × 1000 / km² (área geodésica da malha canônica), `count48h`, top 5 e `unassignedCount`. O total é conferido antes e depois; se mudou no meio, a resposta é erro, não um total incoerente.
-- `GET /fire-hotspots/identify` faz um WFS com `BBOX`, `count=20`. A fonte devolve os N **mais recentes** da caixa, não os mais próximos, por isso a API reordena por distância.
+- `GET /fire-hotspots/identify` faz um WFS com `BBOX`, `count=20`. A fonte devolve os N **mais recentes** da caixa, não os mais próximos, por isso a API reordena por distância. Com mais de 20 focos na caixa o mais próximo pode ficar de fora; o frontend só chama a rota a partir do zoom 7, com caixa de 8 px (até 0,15°; a API aceita 0,5°), para isso ser raro.
 
 Todos os filtros saem de `fire_scope.py` (`id_0=33`, `id_1` ou `id_2`, e a faixa de `data_hora_gmt`). O `at` precisa estar entre 1 min no futuro e 2 h atrás.
 
@@ -20,4 +20,5 @@ Todos os filtros saem de `fire_scope.py` (`id_0=33`, `id_1` ou `id_2`, e a faixa
 ## Limites da fonte
 
 - O GeoServer responde 414 para URLs acima de ~8 KB, então o `SLD_BODY` precisa ficar abaixo de ~5 KB. O SLD aceita `env('wms_scale_denominator')`, `Recode` e `ElseFilter`.
+- O WMS não manda `Cache-Control`/`ETag` e responde `Access-Control-Allow-Origin: *`. Um tile de 256 px leva ~0,4 s. O frontend guarda os tiles em memória por URL (que leva filtro e janela, portanto é imutável); ver `frontend/docs/architecture.md`.
 - ~78 % das detecções são VIIRS 375 m e ~16 % são GOES-19, que repete o mesmo pixel a cada ~10 min: contagem de focos não é o número de incêndios.

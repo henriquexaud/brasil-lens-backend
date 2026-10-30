@@ -12,7 +12,7 @@ Cada entrada registra o que foi decidido, por quê e qual o custo. Para uma deci
 
 **ADR-05 — Alertas ingeridos no banco.** São poucos, valem para o país inteiro e as fontes são lentas e instáveis. Por isso um agendador os grava a cada 10 min e a rota lê do banco. *Custo:* o agendador roda dentro da API; com várias instâncias, desligue nas extras (`WEATHER_REFRESH_ENABLED=false`).
 
-**ADR-06 — Focos: pontos por WMS e números pela API, na mesma janela.** Dezenas de milhares de pontos não cabem em GeoJSON. O WMS desenha os pontos, a API agrega, e todos usam `fire_scope.time_filter`. *Custo:* o SLD fica no frontend, limitado a ~5 KB, e a consistência depende de conferir o total antes e depois da paginação.
+**ADR-06 — Focos: pontos por WMS e números pela API, na mesma janela.** Dezenas de milhares de pontos não cabem em GeoJSON. O WMS desenha os pontos, a API agrega, e todos usam `fire_scope.time_filter`. *Custo:* o SLD fica no frontend, limitado a ~5 KB, e a consistência depende de conferir o total antes e depois da paginação. *Revisto em 2026-10-29:* o INPE não manda cabeçalho de cache, então o frontend guarda os tiles em memória e os pontos entram no zoom 6 (antes 9), sem mudar o contrato. Uma rota própria com todos os pontos compactos (45,5 mil na janela, ~300 KB comprimidos) daria carga única e clique local, mas custaria outro payload e outra rota; fica como alternativa se o WMS continuar lento.
 
 **ADR-07 — Degradação explícita e isolada por fonte.** Há cooldown por fonte e fallback com limite de idade, marcado `stale`/`partial`, ou então um erro com `code` estável. O frontend pausa só aquela fonte. *Custo:* todo payload externo carrega um estado que a interface precisa mostrar.
 
