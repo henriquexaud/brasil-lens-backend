@@ -86,4 +86,4 @@ Cada entrada registra o que foi decidido, por quê e qual o custo. Para uma deci
 
 *Alternativas.* Uma janela de 48 h: vazia. Densidade anual do PRODES (km² desmatados ÷ área): válida, mas não é o corte recente pedido; fica como opção futura no motor de indicadores (`RatioIndicatorSpec`). Gravar os alertas no banco com um job diário: dá histórico, mas exige cron e migração para uma janela de duas semanas.
 
-*Custos.* O casamento por nome do Cerrado pode deixar alertas sem município (contados em `unassignedCount`). A fonte não é uma API documentada; se o WFS mudar, só a aba Alertas falha, com cooldown de 60 s.
+*Custos.* O casamento por nome do Cerrado pode deixar alertas sem município (contados em `unassignedCount`). A fonte não é uma API documentada; o WFS é instável (502 intermitente no Cerrado em 30/10/2026, que derrubou a primeira versão, de uma tentativa só): cada bioma tenta 3 vezes e um bioma fora do ar vira resposta `partial`. Se o WFS mudar de vez, só o checkbox de Alertas falha, com cooldown de 60 s.
