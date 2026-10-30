@@ -32,6 +32,7 @@ class DeforestationAlerts(CamelModel):
     total: int
     total_km2: float
     unassigned_count: int = 0
+    country_density: float | None = None
     biomes: list[str]
     municipalities: list[AlertMunicipality]
     states: list[AlertMunicipality]

@@ -146,3 +146,12 @@ def test_map_values_classify_density_nationally_and_leave_other_territories_with
     assert [item.ibge_code for item in scoped.values] == ["1500107"]
     assert scoped.classification == cities.classification
     assert service.map_values(result, TerritoryLevel.REGION, None).values == []
+
+
+def test_state_values_carry_the_country_density_outside_the_distribution():
+    result = service.aggregate([alert(16, 5.0), alert(10, 2.0, code="1700251")], AREAS, STATES, NOW)
+    assert result.country_density == round(7.0 * 1000 / 1_477_000, 3)
+    states = service.map_values(result, TerritoryLevel.STATE, None)
+    assert [item.ibge_code for item in states.values] == ["15", "17", "BR"]
+    assert states.statistics is not None and states.statistics.count == 2
+    assert service.map_values(result, TerritoryLevel.STATE, "15").values[-1].ibge_code != "BR"

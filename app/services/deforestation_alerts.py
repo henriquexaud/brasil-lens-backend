@@ -99,14 +99,17 @@ def aggregate(
         key=lambda item: item.density or 0.0,
         reverse=True,
     )[:5]
+    country_km2 = sum(item["area_km2"] for item in states if _valid(item["area_km2"]))
+    total_km2 = sum(alert.area_km2 for alert in recent)
     return DeforestationAlerts(
         window_start=start,
         window_end=end,
         days=days,
         fetched_at=fetched_at,
         total=len(recent),
-        total_km2=round(sum(alert.area_km2 for alert in recent), 3),
+        total_km2=round(total_km2, 3),
         unassigned_count=unassigned,
+        country_density=round(total_km2 * 1000 / country_km2, 3) if country_km2 else None,
         biomes=biomes,
         municipalities=municipalities,
         states=[build(area) for area in states if counts[area["ibge_code"]]],
@@ -170,6 +173,12 @@ def map_values(
     national = describe([value for _, value in rows])
     scoped = [(code, value) for code, value in rows if parent is None or code.startswith(parent)]
     scoped_stats = describe([value for _, value in scoped]).statistics
+    # O painel do Brasil lê o valor do país; ele fica fora da distribuição das UFs.
+    country = (
+        [("BR", Decimal(str(result.country_density)))]
+        if level is TerritoryLevel.STATE and parent is None and result.country_density
+        else []
+    )
     classification = None
     if national.statistics and national.classification:
         classification = MapClassification(
@@ -194,6 +203,6 @@ def map_values(
         classification=classification,
         values=[
             MapValue(ibge_code=code, value=value, class_index=national.class_index(value))
-            for code, value in scoped
+            for code, value in [*scoped, *country]
         ],
     )
