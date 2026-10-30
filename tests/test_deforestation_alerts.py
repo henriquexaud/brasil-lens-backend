@@ -6,7 +6,6 @@ import respx
 
 from app.core.config import settings
 from app.core.errors import ProviderError
-from app.models import TerritoryLevel
 from app.providers import deter
 from app.services import deforestation_alerts as service
 
@@ -136,22 +135,12 @@ async def test_fetch_alerts_failure_trips_cooldown():
         await deter.fetch_alerts(date(2026, 10, 1))
 
 
-def test_map_values_classify_density_nationally_and_leave_other_territories_without_value():
-    result = service.aggregate([alert(16, 5.0), alert(10, 2.0, code="1700251")], AREAS, STATES, NOW)
-    cities = service.map_values(result, TerritoryLevel.MUNICIPALITY, None)
-    assert {item.ibge_code: item.value for item in cities.values} == {"1500107": 0.5, "1700251": 20}
-    assert cities.indicator.key == "deforestation_alerts" and cities.indicator.year == 2026
-    assert cities.classification is not None and cities.statistics is not None
-    scoped = service.map_values(result, TerritoryLevel.MUNICIPALITY, "15")
-    assert [item.ibge_code for item in scoped.values] == ["1500107"]
-    assert scoped.classification == cities.classification
-    assert service.map_values(result, TerritoryLevel.REGION, None).values == []
-
-
-def test_state_values_carry_the_country_density_outside_the_distribution():
-    result = service.aggregate([alert(16, 5.0), alert(10, 2.0, code="1700251")], AREAS, STATES, NOW)
-    assert result.country_density == round(7.0 * 1000 / 1_477_000, 3)
-    states = service.map_values(result, TerritoryLevel.STATE, None)
-    assert [item.ibge_code for item in states.values] == ["15", "17", "BR"]
-    assert states.statistics is not None and states.statistics.count == 2
-    assert service.map_values(result, TerritoryLevel.STATE, "15").values[-1].ibge_code != "BR"
+def test_points_carry_the_municipality_code_so_a_state_can_filter_them():
+    alerts = [
+        alert(16, 5.0),
+        alert(10, 2.0, code=None, name="ABREULANDIA", state="TO", biome="Cerrado"),
+        alert(9, 1.0, code=None, name="Desconhecida"),
+    ]
+    result = service.aggregate(alerts, AREAS, STATES, NOW)
+    assert [point.ibge_code for point in result.points] == ["1500107", "1700251", None]
+    assert [point.ibge_code[:2] for point in result.points if point.ibge_code] == ["15", "17"]

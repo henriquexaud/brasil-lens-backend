@@ -1,9 +1,7 @@
 import asyncio
 import math
 from collections import defaultdict
-from dataclasses import asdict
 from datetime import UTC, date, datetime, timedelta
-from decimal import Decimal
 from typing import Any
 from weakref import WeakValueDictionary
 
@@ -12,19 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import redis_cache
 from app.core.cache import TTLCache
 from app.core.errors import ProviderError
-from app.models import TerritoryLevel
 from app.providers import deter
 from app.repositories.boundaries import municipality_areas, state_areas
 from app.repositories.map_projection import data_version
 from app.schemas.deforestation_alerts import AlertMunicipality, AlertPoint, DeforestationAlerts
-from app.schemas.socioeconomic import (
-    MapClassification,
-    MapIndicatorMeta,
-    MapStatistics,
-    MapValue,
-    MapValuesResponse,
-)
-from app.services.classification import describe
 
 # O INPE publica o DETER com ~2 semanas de atraso (a janela de 48 h dos focos ficaria vazia),
 # então o corte é relativo ao último alerta publicado, não a hoje.
@@ -69,8 +58,11 @@ def aggregate(
     counts: defaultdict[str, int] = defaultdict(int)
     latest: dict[str, date] = {}
     unassigned = 0
-    for alert in recent:
-        code = alert.ibge_code or by_name.get((deter.normalize(alert.municipality), alert.state))
+    coded = [
+        (alert, alert.ibge_code or by_name.get((deter.normalize(alert.municipality), alert.state)))
+        for alert in recent
+    ]
+    for alert, code in coded:
         if code is None:
             unassigned += 1
             continue
@@ -99,23 +91,21 @@ def aggregate(
         key=lambda item: item.density or 0.0,
         reverse=True,
     )[:5]
-    country_km2 = sum(item["area_km2"] for item in states if _valid(item["area_km2"]))
-    total_km2 = sum(alert.area_km2 for alert in recent)
     return DeforestationAlerts(
         window_start=start,
         window_end=end,
         days=days,
         fetched_at=fetched_at,
         total=len(recent),
-        total_km2=round(total_km2, 3),
+        total_km2=round(sum(alert.area_km2 for alert in recent), 3),
         unassigned_count=unassigned,
-        country_density=round(total_km2 * 1000 / country_km2, 3) if country_km2 else None,
         biomes=biomes,
         municipalities=municipalities,
         states=[build(area) for area in states if counts[area["ibge_code"]]],
         ranked_municipalities=ranked,
         points=[
             AlertPoint(
+                ibge_code=code,
                 longitude=alert.longitude,
                 latitude=alert.latitude,
                 area_km2=round(alert.area_km2, 4),
@@ -124,7 +114,7 @@ def aggregate(
                 state=alert.state,
                 biome=alert.biome,
             )
-            for alert in recent
+            for alert, code in coded
         ],
     )
 
@@ -155,54 +145,3 @@ async def get_alerts(session: AsyncSession) -> DeforestationAlerts:
         _cache.set(key, result)
         await redis_cache.write("deforestation-alerts", key, result, 7200)
         return result
-
-
-def map_values(
-    result: DeforestationAlerts, level: TerritoryLevel, parent: str | None
-) -> MapValuesResponse:
-    """A densidade no formato dos indicadores, para o mapa pintar, classificar e ranquear igual.
-
-    Território sem alerta na janela fica sem valor: a fonte só cobre Amazônia e Cerrado, e um
-    zero seria afirmar que o resto do país não teve desmatamento.
-    """
-    source = {
-        TerritoryLevel.STATE: result.states,
-        TerritoryLevel.MUNICIPALITY: result.municipalities,
-    }.get(level, [])
-    rows = [(item.ibge_code, Decimal(str(item.density))) for item in source if item.density]
-    national = describe([value for _, value in rows])
-    scoped = [(code, value) for code, value in rows if parent is None or code.startswith(parent)]
-    scoped_stats = describe([value for _, value in scoped]).statistics
-    # O painel do Brasil lê o valor do país; ele fica fora da distribuição das UFs.
-    country = (
-        [("BR", Decimal(str(result.country_density)))]
-        if level is TerritoryLevel.STATE and parent is None and result.country_density
-        else []
-    )
-    classification = None
-    if national.statistics and national.classification:
-        classification = MapClassification(
-            classes=national.classification.classes,
-            breaks=national.classification.breaks,
-            min=national.statistics.min,
-            max=national.statistics.max,
-        )
-    return MapValuesResponse(
-        level=level,
-        parent=parent,
-        version=f"deter:{result.window_end}:{result.fetched_at.date()}",
-        indicator=MapIndicatorMeta(
-            key="deforestation_alerts",
-            name="Alertas de desmatamento",
-            unit="km² / 1.000 km²",
-            decimal_places=2,
-            year=result.window_end.year if result.window_end else None,
-            requested_year="latest",
-        ),
-        statistics=MapStatistics(**asdict(scoped_stats)) if scoped_stats else None,
-        classification=classification,
-        values=[
-            MapValue(ibge_code=code, value=value, class_index=national.class_index(value))
-            for code, value in [*scoped, *country]
-        ],
-    )
