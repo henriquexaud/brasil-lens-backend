@@ -63,6 +63,8 @@ class Settings(BaseSettings):
     inpe_queimadas_wfs_url: str = "https://data.inpe.br/queimadas/geoserver/wfs"
     inpe_queimadas_wms_url: str = "https://data.inpe.br/queimadas/geoserver/wms"
     inpe_queimadas_http_timeout: float = 30.0
+    deter_wfs_url: str = "https://terrabrasilis.dpi.inpe.br/geoserver"
+    deter_http_timeout: float = 60.0
     fire_hotspots_cache_ttl_seconds: int = 600
 
     geometry_overview_tolerance: float = 0.005

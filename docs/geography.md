@@ -52,6 +52,17 @@ A importação tem uma transação para todas as fontes e derivados; uma falha a
 
 UF, região e Brasil somam os municípios da fonte pelo prefixo do código IBGE (floresta: soma de hectares de floresta sobre soma de área, nunca média de percentuais). A transação é única: falha de uma fonte preserva a série anterior. Testes: `test_environment.py`, sem rede (fixtures de JSON e um xlsx mínimo gerado no teste).
 
+## Alertas de desmatamento (DETER/INPE)
+
+Aba **Alertas** do Meio ambiente ([ADR-20](decisions.md)). Sob demanda, sem persistência, como os focos. Código: `providers/deter.py`, `services/deforestation_alerts.py`, `api/v1/deforestation_alerts.py`. Testes: `test_deforestation_alerts.py`, sem rede.
+
+- `GET /deforestation-alerts` devolve a janela (`windowStart`/`windowEnd`, 14 dias), o total e os km², os municípios e UFs com alerta (`alertKm2`, `count`, `density` = km² × 1000 / área do município, área geodésica da malha canônica, a mesma dos focos), os cinco maiores e **os pontos** (centro do polígono de cada alerta, ~250 KB). Só entram municípios com alerta; os demais ficam sem valor.
+- `GET /deforestation-alerts/values?level=state|municipality&parent=` devolve a mesma densidade no formato `MapValuesResponse` do motor de indicadores (`deforestation_alerts`, classes por quantis nacionais calculadas com `services/classification.describe`), para o mapa pintar, classificar e ranquear como o PRODES, sem tocar no banco. Outro nível devolve lista vazia.
+- Fonte: WFS do TerraBrasilis (`deter-amz:deter_amz` e `deter-cerrado-nb:deter_cerrado`), `view_date >= hoje − 30 dias` e `classname IN (DESMATAMENTO_CR, DESMATAMENTO_VEG, MINERACAO)`, as classes que o painel do INPE soma como desmatamento. O fim da janela é o **último `view_date` publicado**, não hoje: o INPE publica com ~2 semanas de atraso (em 30/10/2026 o último era 16/10), e uma janela de 48 h ficaria vazia.
+- O município vem de `mun_geocod` (Amazônia). O DETER do Cerrado só traz nome e UF: o casamento é por nome sem acento e UF contra a malha; quem não casa entra em `unassignedCount`.
+- Cache: 2 h em memória e no Redis, chave com o dia e a `data_version`; lock por chave, falha memorizada por 60 s e `deter_cooldown` de 60 s. A rota responde `Cache-Control: public, max-age=600`.
+- Limites: só Amazônia e Cerrado (os outros biomas não têm alerta diário); é alerta de fiscalização, não a taxa do PRODES, e a resposta carrega `notice` com isso. Consulta ordenada por `view_date` leva ~22 s na fonte (sem índice): por isso a janela sai de um filtro, nunca de `sortBy`.
+
 ## Hidrografia (ANA/SNIRH)
 
 `GET /hydrography?zoom=&bbox=` (`services/hydrography.py`). Só o zoom e a área definem a resposta; a rota não usa o banco.
