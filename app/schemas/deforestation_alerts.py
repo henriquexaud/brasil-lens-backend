@@ -33,7 +33,9 @@ class DeforestationAlerts(CamelModel):
     total: int
     total_km2: float
     unassigned_count: int = 0
+    # Os biomas que responderam; menos que Amazônia e Cerrado quando a fonte falhou em um deles.
     biomes: list[str]
+    partial: bool = False
     municipalities: list[AlertMunicipality]
     states: list[AlertMunicipality]
     ranked_municipalities: list[AlertMunicipality]

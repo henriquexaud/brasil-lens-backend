@@ -106,8 +106,13 @@ def feature(day):
     }
 
 
+@pytest.fixture
+def no_retry_delay(monkeypatch):
+    monkeypatch.setattr(deter, "RETRY_DELAY", 0)
+
+
 @respx.mock
-async def test_fetch_alerts_filters_classes_and_queries_both_biomes():
+async def test_fetch_alerts_filters_classes_and_queries_both_biomes(no_retry_delay):
     base = settings.deter_wfs_url
     amazon = respx.get(f"{base}/deter-amz/ows").mock(
         return_value=httpx.Response(200, json=collection(feature("16")))
@@ -115,32 +120,63 @@ async def test_fetch_alerts_filters_classes_and_queries_both_biomes():
     respx.get(f"{base}/deter-cerrado-nb/ows").mock(
         return_value=httpx.Response(200, json=collection(feature("15")))
     )
-    alerts = await deter.fetch_alerts(date(2026, 10, 1))
+    alerts, answered = await deter.fetch_alerts(date(2026, 10, 1))
     assert sorted(item.biome for item in alerts) == ["Amazônia", "Cerrado"]
+    assert answered == ["Amazônia", "Cerrado"]
     cql = amazon.calls.last.request.url.params["cql_filter"]
     assert "view_date >= '2026-10-01'" in cql and "DESMATAMENTO_CR" in cql
     assert "CICATRIZ" not in cql
 
 
 @respx.mock
-async def test_fetch_alerts_failure_trips_cooldown():
+async def test_a_flaky_502_is_retried_before_giving_up_on_the_biome(no_retry_delay):
+    base = settings.deter_wfs_url
+    respx.get(f"{base}/deter-amz/ows").mock(
+        return_value=httpx.Response(200, json=collection(feature("16")))
+    )
+    cerrado = respx.get(f"{base}/deter-cerrado-nb/ows").mock(
+        side_effect=[
+            httpx.Response(502),
+            httpx.Response(502),
+            httpx.Response(200, json=collection(feature("15"))),
+        ]
+    )
+    _, answered = await deter.fetch_alerts(date(2026, 10, 1))
+    assert answered == ["Amazônia", "Cerrado"] and cerrado.call_count == 3
+    assert not deter.deter_cooldown.active
+
+
+@respx.mock
+async def test_one_biome_down_returns_the_other_as_a_partial_answer(no_retry_delay):
+    base = settings.deter_wfs_url
+    respx.get(f"{base}/deter-amz/ows").mock(
+        return_value=httpx.Response(200, json=collection(feature("16")))
+    )
+    respx.get(f"{base}/deter-cerrado-nb/ows").mock(return_value=httpx.Response(502))
+    alerts, answered = await deter.fetch_alerts(date(2026, 10, 1))
+    assert answered == ["Amazônia"] and [item.biome for item in alerts] == ["Amazônia"]
+    assert not deter.deter_cooldown.active
+    result = service.aggregate(alerts, AREAS, STATES, NOW, biomes=answered)
+    assert result.partial and result.biomes == ["Amazônia"]
+
+
+@respx.mock
+async def test_all_biomes_down_trips_the_cooldown(no_retry_delay):
     base = settings.deter_wfs_url
     respx.get(f"{base}/deter-amz/ows").mock(return_value=httpx.Response(500))
-    respx.get(f"{base}/deter-cerrado-nb/ows").mock(
-        return_value=httpx.Response(200, json=collection())
-    )
+    respx.get(f"{base}/deter-cerrado-nb/ows").mock(return_value=httpx.Response(502))
     with pytest.raises(ProviderError):
         await deter.fetch_alerts(date(2026, 10, 1))
     with pytest.raises(ProviderError, match="Nova tentativa"):
         await deter.fetch_alerts(date(2026, 10, 1))
 
 
-def test_points_carry_the_municipality_code_so_a_state_can_filter_them():
-    alerts = [
-        alert(16, 5.0),
-        alert(10, 2.0, code=None, name="ABREULANDIA", state="TO", biome="Cerrado"),
-        alert(9, 1.0, code=None, name="Desconhecida"),
-    ]
-    result = service.aggregate(alerts, AREAS, STATES, NOW)
-    assert [point.ibge_code for point in result.points] == ["1500107", "1700251", None]
-    assert [point.ibge_code[:2] for point in result.points if point.ibge_code] == ["15", "17"]
+@respx.mock
+async def test_a_client_error_is_not_retried(no_retry_delay):
+    base = settings.deter_wfs_url
+    amazon = respx.get(f"{base}/deter-amz/ows").mock(return_value=httpx.Response(400))
+    respx.get(f"{base}/deter-cerrado-nb/ows").mock(
+        return_value=httpx.Response(200, json=collection(feature("15")))
+    )
+    _, answered = await deter.fetch_alerts(date(2026, 10, 1))
+    assert answered == ["Cerrado"] and amazon.call_count == 1

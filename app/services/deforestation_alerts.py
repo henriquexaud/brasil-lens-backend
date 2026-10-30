@@ -19,6 +19,7 @@ from app.schemas.deforestation_alerts import AlertMunicipality, AlertPoint, Defo
 # então o corte é relativo ao último alerta publicado, não a hoje.
 WINDOW_DAYS = 14
 LOOKBACK_DAYS = 30
+PARTIAL_TTL = 300
 _cache: TTLCache[DeforestationAlerts] = TTLCache(7200, 4)
 _failures: TTLCache[bool] = TTLCache(60, 4)
 _locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
@@ -34,8 +35,11 @@ def aggregate(
     states: list[dict[str, Any]],
     fetched_at: datetime,
     days: int = WINDOW_DAYS,
+    biomes: list[str] | None = None,
 ) -> DeforestationAlerts:
-    biomes = [name for name, _, _ in deter.BIOMES]
+    every = [name for name, _, _ in deter.BIOMES]
+    biomes = every if biomes is None else biomes
+    partial = len(biomes) < len(every)
     if not alerts:
         return DeforestationAlerts(
             window_start=None,
@@ -45,6 +49,7 @@ def aggregate(
             total=0,
             total_km2=0.0,
             biomes=biomes,
+            partial=partial,
             municipalities=[],
             states=[],
             ranked_municipalities=[],
@@ -100,6 +105,7 @@ def aggregate(
         total_km2=round(sum(alert.area_km2 for alert in recent), 3),
         unassigned_count=unassigned,
         biomes=biomes,
+        partial=partial,
         municipalities=municipalities,
         states=[build(area) for area in states if counts[area["ibge_code"]]],
         ranked_municipalities=ranked,
@@ -135,13 +141,19 @@ async def get_alerts(session: AsyncSession) -> DeforestationAlerts:
         if _failures.get(key):
             raise ProviderError("Alertas do INPE temporariamente indisponíveis.")
         try:
-            alerts = await deter.fetch_alerts(now.date() - timedelta(days=LOOKBACK_DAYS))
+            alerts, answered = await deter.fetch_alerts(now.date() - timedelta(days=LOOKBACK_DAYS))
         except ProviderError:
             _failures.set(key, True)
             raise
         result = aggregate(
-            alerts, await municipality_areas(session), await state_areas(session), now
+            alerts,
+            await municipality_areas(session),
+            await state_areas(session),
+            now,
+            biomes=answered,
         )
-        _cache.set(key, result)
-        await redis_cache.write("deforestation-alerts", key, result, 7200)
+        # Resposta parcial vale 5 min, para o bioma que falhou voltar logo.
+        ttl = PARTIAL_TTL if result.partial else None
+        _cache.set(key, result, ttl_seconds=ttl)
+        await redis_cache.write("deforestation-alerts", key, result, ttl or 7200)
         return result

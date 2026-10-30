@@ -10,7 +10,9 @@ import httpx
 from app.core.config import settings
 from app.core.cooldown import SourceCooldown
 from app.core.errors import ProviderError
+from app.core.logging import get_logger
 
+logger = get_logger(__name__)
 deter_cooldown = SourceCooldown("deter", 60)
 
 # O painel do INPE soma estas três classes como "desmatamento"; cicatriz de queimada, degradação
@@ -22,6 +24,10 @@ BIOMES = (
     ("Cerrado", "deter-cerrado-nb", "deter_cerrado"),
 )
 MAX_FEATURES = 20000
+# O WFS do TerraBrasilis devolve 502 de forma intermitente (o do Cerrado, em cerca de metade das
+# chamadas em 30/10/2026), então uma falha 5xx ou de rede é repetida antes de desistir do bioma.
+ATTEMPTS = 3
+RETRY_DELAY = 0.5
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,16 +99,47 @@ async def _fetch_biome(
     return [parse_feature(biome, feature) for feature in data["features"]]
 
 
-async def fetch_alerts(since: date) -> list[Alert]:
+async def _fetch_biome_retrying(
+    client: httpx.AsyncClient, biome: str, workspace: str, layer: str, since: date
+) -> list[Alert]:
+    for attempt in range(ATTEMPTS):
+        try:
+            return await _fetch_biome(client, biome, workspace, layer, since)
+        except (httpx.TransportError, httpx.HTTPStatusError) as exc:
+            retryable = (
+                not isinstance(exc, httpx.HTTPStatusError) or exc.response.status_code >= 500
+            )
+            if not retryable or attempt == ATTEMPTS - 1:
+                raise
+            await asyncio.sleep(RETRY_DELAY)
+    raise AssertionError("inalcançável")
+
+
+async def fetch_alerts(since: date) -> tuple[list[Alert], list[str]]:
+    """Os alertas dos biomas que responderam e a lista deles; só falha se nenhum responder."""
     if deter_cooldown.active:
         raise ProviderError(
             "O INPE não está respondendo. Nova tentativa automática em "
             f"{deter_cooldown.remaining_seconds()} s."
         )
-    try:
-        async with httpx.AsyncClient(timeout=settings.deter_http_timeout) as client:
-            parts = await asyncio.gather(*(_fetch_biome(client, *biome, since) for biome in BIOMES))
-    except (httpx.HTTPError, ValueError, TypeError, KeyError, AttributeError) as exc:
+    async with httpx.AsyncClient(timeout=settings.deter_http_timeout) as client:
+        results = await asyncio.gather(
+            *(_fetch_biome_retrying(client, *biome, since) for biome in BIOMES),
+            return_exceptions=True,
+        )
+    alerts: list[Alert] = []
+    answered: list[str] = []
+    for (biome, _, _), result in zip(BIOMES, results, strict=True):
+        if isinstance(result, list):
+            alerts.extend(result)
+            answered.append(biome)
+        elif isinstance(
+            result, httpx.HTTPError | ValueError | TypeError | KeyError | AttributeError
+        ):
+            logger.warning("deter.biome_failed", extra={"biome": biome, "error": repr(result)})
+        else:
+            raise result
+    if not answered:
         deter_cooldown.trip()
-        raise ProviderError("Não foi possível consultar os alertas do DETER no INPE.") from exc
-    return [alert for part in parts for alert in part]
+        raise ProviderError("Não foi possível consultar os alertas do DETER no INPE.")
+    return alerts, answered
