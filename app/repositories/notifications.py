@@ -104,6 +104,14 @@ async def enqueue(session: AsyncSession, rows: list[dict[str, Any]]) -> None:
         ON CONFLICT DO NOTHING
     """)
     )
+    # Depois que o aviso expira, o evento não deduplica mais nada: guardá-lo além de 30 dias
+    # só reteria dado pessoal sem uso (a Política de Privacidade promete esse prazo).
+    await session.execute(
+        text("""
+        DELETE FROM notification_events n USING weather_alerts a
+         WHERE a.id = n.alert_id AND a.expires < now() - interval '30 days'
+    """)
+    )
     await session.commit()
 
 

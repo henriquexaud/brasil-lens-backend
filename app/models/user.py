@@ -18,6 +18,8 @@ class User(Base, TimestampMixin):
     email: Mapped[str | None] = mapped_column(String(254), unique=True)
     password_hash: Mapped[str | None] = mapped_column(String(256))
     theme: Mapped[str] = mapped_column(String(5), nullable=False, server_default="light")
+    terms_version: Mapped[str | None] = mapped_column(String(16))
+    terms_accepted_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
 
     __table_args__ = (
         CheckConstraint("theme IN ('light', 'dark')", name="theme_valid"),

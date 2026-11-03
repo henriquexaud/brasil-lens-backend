@@ -155,6 +155,35 @@ async def test_event_is_channel_independent_and_validity_refresh_does_not_repeat
 
 
 @pytest.mark.db
+async def test_events_of_alerts_expired_over_30_days_are_purged(session, scenario):
+    await service.dispatch(session)
+    alert = scenario["alert"]
+    await session.execute(
+        update(WeatherAlert)
+        .where(WeatherAlert.id == alert.id)
+        .values(expires=datetime.now(UTC) - timedelta(days=29))
+    )
+    await session.commit()
+    await repo.enqueue(session, [])
+    kept = await session.execute(
+        select(NotificationEvent).where(NotificationEvent.alert_id == alert.id)
+    )
+    assert kept.first() is not None
+
+    await session.execute(
+        update(WeatherAlert)
+        .where(WeatherAlert.id == alert.id)
+        .values(expires=datetime.now(UTC) - timedelta(days=31))
+    )
+    await session.commit()
+    await repo.enqueue(session, [])
+    remaining = await session.execute(
+        select(NotificationEvent).where(NotificationEvent.alert_id == alert.id)
+    )
+    assert remaining.first() is None
+
+
+@pytest.mark.db
 async def test_changed_severity_generates_a_new_event(session, scenario, sender):
     assert await service.dispatch(session) == 1
     scenario["alert"].severity = "Alto"
