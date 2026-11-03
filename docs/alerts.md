@@ -18,7 +18,7 @@ Um advisory lock no Postgres coordena cron e API, com uma transação por envio.
 
 `public/sw.js` no frontend existe apenas para push/click: não intercepta `fetch`, não tem cache offline e não altera o frescor dos dados. HTTPS e navegador compatível são necessários; no iOS/iPadOS, é preciso instalar na Tela de Início (16.4+). O usuário autoriza cada dispositivo por uma ação explícita; abrir/cadastrar não pede permissão. A entrega depende também da rede e das permissões do sistema.
 
-Com `PUSH_NOTIFICATIONS_ENABLED=true` e chaves configuradas, o agendador da API executa o envio. `.github/workflows/notifications.yml` ingere INMET/CEMADEN e despacha a cada 30 min mesmo com o Render dormindo. Atrasos do GitHub e limitações gratuitas impedem prometer envio instantâneo ou disponibilidade contínua. Não substitui os canais oficiais da Defesa Civil. Configuração: [development](development.md#notificacoes-do-pwa).
+Com `PUSH_NOTIFICATIONS_ENABLED=true` e chaves configuradas, o agendador da API executa o envio. `.github/workflows/notifications.yml` ingere INMET/CEMADEN e despacha a cada 30 min, como reserva independente da API. Atrasos do GitHub e a entrega sem SLA impedem prometer envio instantâneo ou disponibilidade contínua. Não substitui os canais oficiais da Defesa Civil. Configuração: [development](development.md#notificacoes-do-pwa).
 
 Testes: `test_notifications.py` e `test_notification_migration.py`, sem push real, cobrem autorização/revogação, troca de conta, múltiplos dispositivos, abrangência, expiração, deduplicação e novas tentativas. O frontend testa permissão, inscrição/cancelamento, worker sem cache e abertura do município.
 
