@@ -33,6 +33,6 @@ Antes de mudar comportamento, leia [docs/invariants.md](docs/invariants.md). Vis
 ```sh
 docker run --rm --network brasil-lens_default -v "$PWD":/app -w /app \
   -e DATABASE_URL=postgresql+asyncpg://brasil_lens:brasil_lens@db:5432/brasil_lens \
-  -e WEATHER_REFRESH_ENABLED=false -e REDIS_CACHE_PREFIX=bl-test:v4 \
+  -e APP_ENV=test -e WEATHER_REFRESH_ENABLED=false -e REDIS_CACHE_PREFIX=bl-test:v4 \
   brasil-lens-api-dev:latest sh -c "pytest -q && ruff check app tests && ruff format --check app tests && mypy app"
 ```
