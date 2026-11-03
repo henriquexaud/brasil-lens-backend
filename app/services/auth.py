@@ -90,6 +90,7 @@ async def login(
         (user.password_hash if user else None) or _DUMMY_HASH,
     )
     if user is None or not valid:
+        security.record_auth_failure(body.email)
         raise AuthenticationError("E-mail ou senha incorretos.")
     security.clear_auth_attempts(body.email, ip)
     return await _start_session(session, user, old_token)
@@ -115,6 +116,7 @@ async def delete_account(
     assert user.email is not None and user.password_hash is not None
     security.check_auth_attempt(user.email, ip)
     if not await run_in_threadpool(security.verify_password, password, user.password_hash):
+        security.record_auth_failure(user.email)
         raise InvalidParameterError("Senha incorreta.", parameter="password")
     security.clear_auth_attempts(user.email, ip)
     await users.remove(session, user.id)

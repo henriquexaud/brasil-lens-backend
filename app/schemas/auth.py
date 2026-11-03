@@ -3,6 +3,7 @@ from typing import Any, Literal
 
 from pydantic import Field, field_validator
 
+from app.core.password_policy import is_common_password
 from app.schemas.common import CamelModel
 
 Theme = Literal["light", "dark"]
@@ -29,6 +30,15 @@ class RegisterRequest(LoginRequest):
     @classmethod
     def strip_name(cls, value: object) -> object:
         return value.strip() if isinstance(value, str) else value
+
+    @field_validator("password")
+    @classmethod
+    def reject_common_password(cls, value: str) -> str:
+        if is_common_password(value):
+            raise ValueError(
+                "Esta senha é muito comum. Escolha uma senha mais difícil de adivinhar."
+            )
+        return value
 
 
 class UserOut(CamelModel):

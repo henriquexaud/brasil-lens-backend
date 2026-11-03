@@ -30,6 +30,7 @@ namespaces = false
 
 [tool.setuptools.package-data]
 "app.services" = ["data/*.json"]
+"app.core" = ["*.txt"]
 
 [project.optional-dependencies]
 dev = [

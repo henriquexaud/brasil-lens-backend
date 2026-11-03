@@ -101,6 +101,46 @@ def test_the_window_is_fixed_so_insisting_does_not_extend_it(
     security.check_auth_attempt("fixa@exemplo.com", "198.51.100.3")
 
 
+def test_the_email_lock_escalates_and_ignores_the_ip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = 1000.0
+    monkeypatch.setattr("time.monotonic", lambda: now)
+    email = "alvo@exemplo.com"
+    # A franquia de erros de digitação não tranca, mesmo trocando de IP a cada tentativa.
+    for index in range(security.EMAIL_FREE_FAILURES):
+        security.check_auth_attempt(email, f"203.0.113.{index}")
+        security.record_auth_failure(email)
+    # A falha seguinte tranca o e-mail; forjar um IP novo não contorna o bloqueio.
+    security.check_auth_attempt(email, "203.0.113.200")
+    security.record_auth_failure(email)
+    with pytest.raises(AuthRateLimitedError):
+        security.check_auth_attempt(email, "198.51.100.9")
+    # Passado o primeiro degrau, aceita de novo; a nova falha tranca por mais tempo (escada).
+    now += security._EMAIL_LOCK_LADDER[0] + 1
+    security.check_auth_attempt(email, "198.51.100.9")
+    security.record_auth_failure(email)
+    now += security._EMAIL_LOCK_LADDER[0] + 1
+    with pytest.raises(AuthRateLimitedError):
+        security.check_auth_attempt(email, "198.51.100.9")
+
+
+def test_a_successful_auth_clears_the_email_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = 1000.0
+    monkeypatch.setattr("time.monotonic", lambda: now)
+    email = "perdoa@exemplo.com"
+    for _ in range(security.EMAIL_FREE_FAILURES + 1):
+        security.check_auth_attempt(email)
+        security.record_auth_failure(email)
+    with pytest.raises(AuthRateLimitedError):
+        security.check_auth_attempt(email)
+    security.clear_auth_attempts(email)
+    now += 1
+    security.check_auth_attempt(email)
+
+
 async def test_private_routes_require_authentication() -> None:
     async with _api() as client:
         for path in ("/auth/me", "/me/followed-municipalities", "/me/data"):
@@ -399,8 +439,20 @@ async def test_account_deletion_is_rate_limited_like_login(session: AsyncSession
         await client.post("/api/v1/auth/register", json=_account())
         statuses = [
             (await client.post("/api/v1/me/delete", json={"password": "incorreta"})).status_code
-            for _ in range(security.ACCOUNT_LIMIT + 1)
+            for _ in range(security.EMAIL_FREE_FAILURES + 3)
         ]
-        assert statuses[:-1] == [400] * security.ACCOUNT_LIMIT
-        assert statuses[-1] == 429
+        # A franquia de falhas responde 400 (senha errada); a partir dela o e-mail tranca (429),
+        # como no login, porque ambos registram a falha por e-mail.
+        blocked = statuses.index(429)
+        assert blocked == security.EMAIL_FREE_FAILURES + 1
+        assert set(statuses[:blocked]) == {400}
+        assert all(status == 429 for status in statuses[blocked:])
     await session.rollback()
+
+
+async def test_registration_rejects_a_common_password() -> None:
+    # Senhas da lista das mais comuns são barradas no cadastro, antes de tocar o banco.
+    async with _api() as client:
+        response = await client.post("/api/v1/auth/register", json=_account(password="qwerty123"))
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "validation_error"
