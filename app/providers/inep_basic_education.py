@@ -42,8 +42,8 @@ PUBLIC_NETWORKS = frozenset({"1", "2", "3"})
 # EJA e educação profissional), que decide se a escola conta.
 STAGES = {
     "all": "QT_MAT_BAS",
-    "daycare": "QT_MAT_INF_CRE",
-    "preschool": "QT_MAT_INF_PRE",
+    # Creche e pré-escola juntas: QT_MAT_INF é a soma das duas em 2019–2025.
+    "early_childhood": "QT_MAT_INF",
     "elementary": "QT_MAT_FUND",
     "high_school": "QT_MAT_MED",
 }

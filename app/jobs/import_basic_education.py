@@ -44,9 +44,9 @@ _ONE_DECIMAL = Decimal("0.1")
 # Tabela 9514 (Censo 2022): população residente por idade simples. As categorias
 # 6557 a 6574 são as idades de menos de 1 ano a 17 anos, em sequência.
 _FIRST_AGE_CATEGORY = 6557
-# Só as etapas com atendimento (ver BASIC_STAGES): creche e ensino médio.
+# Só as etapas com atendimento (ver BASIC_STAGES): educação infantil e ensino médio.
 AGE_BANDS = {
-    "daycare": range(0, 4),
+    "early_childhood": range(0, 6),
     "high_school": range(15, 18),
 }
 
@@ -162,7 +162,9 @@ async def _replace_year(
     return {
         "municipalities": len(census.municipalities),
         "schools": sum(item.schools["all"] for item in census.municipalities.values()),
-        "daycares": sum(item.schools["daycare"] for item in census.municipalities.values()),
+        "early_childhood": sum(
+            item.schools["early_childhood"] for item in census.municipalities.values()
+        ),
         "values": written,
     }
 
@@ -218,7 +220,7 @@ def _print(report: RunReport) -> None:
 
 async def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Importa escolas e creches públicas do Censo Escolar do INEP."
+        description="Importa as escolas públicas do Censo Escolar do INEP."
     )
     parser.add_argument(
         "--years",

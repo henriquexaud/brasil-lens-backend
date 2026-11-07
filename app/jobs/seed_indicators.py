@@ -305,8 +305,7 @@ _BASIC_SOURCE = (
 # (em 2025, mediana municipal de 92% e 95%, um terço dos municípios acima de 100%,
 # por alunos fora da idade e de municípios vizinhos) e não diferencia lugares.
 BASIC_STAGES: dict[str, tuple[str, str, str | None]] = {
-    "daycare": ("com creche", "em creche pública", "0 a 3 anos"),
-    "preschool": ("com pré-escola", "na pré-escola pública", None),
+    "early_childhood": ("com educação infantil", "na educação infantil pública", "0 a 5 anos"),
     "elementary": ("com ensino fundamental", "no ensino fundamental público", None),
     "high_school": ("com ensino médio", "no ensino médio público", "15 a 17 anos"),
 }
@@ -396,8 +395,16 @@ BASIC_EDUCATION_CATALOG: tuple[IndicatorSeed, ...] = (
     ),
     *(seed for index, stage in enumerate(BASIC_STAGES) for seed in _stage_seeds(index, stage)),
 )
-# Chaves da primeira versão da educação básica, trocadas pelo padrão por etapa.
-RETIRED_BASIC_KEYS = ("basic_daycares",)
+# Chaves de versões anteriores: a primeira (só creches) e a com creche e pré-escola
+# separadas, que viraram a educação infantil.
+RETIRED_BASIC_KEYS = (
+    "basic_daycares",
+    "basic_daycare_schools",
+    "basic_daycare_enrollment",
+    "basic_daycare_coverage",
+    "basic_preschool_schools",
+    "basic_preschool_enrollment",
+)
 
 
 async def seed_catalog(session: AsyncSession, catalog: tuple[IndicatorSeed, ...] = CATALOG) -> int:
