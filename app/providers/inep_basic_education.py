@@ -1,4 +1,4 @@
-"""Censo Escolar do INEP: escolas e creches públicas por município (ADR-23).
+"""Censo Escolar do INEP: escolas públicas por município e etapa (ADR-23).
 
 Cada ano é um zip de microdados com uma linha por escola (Latin-1, `;`). Até
 2024 tudo vem num CSV só (`microdados_ed_basica_{ano}.csv`, ~420 colunas); a
@@ -7,7 +7,7 @@ partir de 2025 o INEP separou o cadastro (`Tabela_Escola`) das matrículas
 rede e matrículas por etapa de cada escola.
 
 Escola conta quando é pública (federal, estadual ou municipal) e tem matrícula
-na educação básica no ano; creche, quando tem matrícula de creche. Isso dispensa
+na educação básica no ano; numa etapa, quando tem matrícula nela. Isso dispensa
 a situação de funcionamento (que a tabela de 2025 não traz): em 2019–2024
 nenhuma escola paralisada ou extinta tinha matrícula. Privadas, inclusive as
 conveniadas com o poder público, ficam de fora.
@@ -27,7 +27,7 @@ import httpx
 from app.core.errors import ProviderError
 from app.providers.inep_higher_education import client, download_file
 
-__all__ = ["Census", "Counts", "client", "download", "read_census"]
+__all__ = ["STAGES", "Census", "Counts", "client", "download", "read_census"]
 
 SOURCE = "INEP"
 DATASET_URL = (
@@ -38,18 +38,29 @@ DOWNLOAD_URL = "https://download.inep.gov.br/dados_abertos/microdados_censo_esco
 _FILE_NAMES = {2025: "2025_"}
 
 PUBLIC_NETWORKS = frozenset({"1", "2", "3"})
-_COLUMNS = ("CO_MUNICIPIO", "TP_DEPENDENCIA", "QT_MAT_BAS", "QT_MAT_INF_CRE")
+# Etapa → coluna de matrículas da escola. "all" é a educação básica inteira (com
+# EJA e educação profissional), que decide se a escola conta.
+STAGES = {
+    "all": "QT_MAT_BAS",
+    "daycare": "QT_MAT_INF_CRE",
+    "preschool": "QT_MAT_INF_PRE",
+    "elementary": "QT_MAT_FUND",
+    "high_school": "QT_MAT_MED",
+}
+_COLUMNS = ("CO_MUNICIPIO", "TP_DEPENDENCIA", *STAGES.values())
 _MEMBERS = ("MICRODADOS_ED_BASICA_", "TABELA_MATRICULA_")
+
+
+def _zeros() -> dict[str, int]:
+    return dict.fromkeys(STAGES, 0)
 
 
 @dataclass(slots=True)
 class Counts:
-    """Escolas e creches públicas de um município, com as matrículas delas."""
+    """Escolas públicas de um município por etapa, com as matrículas delas."""
 
-    schools: int = 0
-    enrollment: int = 0
-    daycares: int = 0
-    daycare_enrollment: int = 0
+    schools: dict[str, int] = field(default_factory=_zeros)
+    enrollment: dict[str, int] = field(default_factory=_zeros)
 
 
 @dataclass(slots=True)
@@ -94,16 +105,15 @@ def read_census(path: Path, year: int) -> Census:
     census = Census(year=year)
     try:
         with zipfile.ZipFile(path) as archive:
-            for municipality, network, enrollment, daycare in _rows(archive):
-                total = _int(enrollment)
-                if network not in PUBLIC_NETWORKS or total <= 0:
+            for municipality, network, *enrollment in _rows(archive):
+                values = dict(zip(STAGES, map(_int, enrollment), strict=True))
+                if network not in PUBLIC_NETWORKS or values["all"] <= 0:
                     continue
                 counts = census.municipalities.setdefault(municipality.strip(), Counts())
-                counts.schools += 1
-                counts.enrollment += total
-                if (daycare_total := _int(daycare)) > 0:
-                    counts.daycares += 1
-                    counts.daycare_enrollment += daycare_total
+                for stage, value in values.items():
+                    if value > 0:
+                        counts.schools[stage] += 1
+                        counts.enrollment[stage] += value
     except zipfile.BadZipFile as exc:
         raise ProviderError(f"O arquivo do Censo Escolar de {year} não é um zip válido.") from exc
     except (ValueError, IndexError) as exc:

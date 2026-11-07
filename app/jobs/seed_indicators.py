@@ -294,73 +294,110 @@ EDUCATION_CATALOG: tuple[IndicatorSeed, ...] = tuple(
 RETIRED_EDUCATION_KEYS = ("higher_ed_public_enrollment",)
 
 
-# Educação básica (ADR-23): escolas e creches das redes públicas no Censo Escolar
-# do INEP, pelo município da escola. O Censo cobre todas as escolas: zero é medição.
+# Educação básica (ADR-23): escolas das redes públicas no Censo Escolar do INEP,
+# pelo município da escola, por etapa. O Censo cobre todas as escolas: zero é medição.
 _BASIC_SOURCE = (
     "Redes federal, estadual e municipal, pelo município da escola (Censo Escolar, "
     "INEP). Escolas privadas, inclusive as conveniadas com o poder público, não entram."
 )
+# Etapa → (como a escola a oferece, onde a matrícula está, faixa etária do
+# atendimento). Pré-escola e fundamental não têm atendimento: a taxa bruta satura
+# (em 2025, mediana municipal de 92% e 95%, um terço dos municípios acima de 100%,
+# por alunos fora da idade e de municípios vizinhos) e não diferencia lugares.
+BASIC_STAGES: dict[str, tuple[str, str, str | None]] = {
+    "daycare": ("com creche", "em creche pública", "0 a 3 anos"),
+    "preschool": ("com pré-escola", "na pré-escola pública", None),
+    "elementary": ("com ensino fundamental", "no ensino fundamental público", None),
+    "high_school": ("com ensino médio", "no ensino médio público", "15 a 17 anos"),
+}
 
 
-def _basic(key: str, name: str, unit: str, scope: str, order: int) -> IndicatorSeed:
+def basic_key(stage: str, metric: str) -> str:
+    """`basic_schools`, `basic_enrollment` e `basic_<etapa>_<medida>`."""
+    return f"basic_{metric}" if stage == "all" else f"basic_{stage}_{metric}"
+
+
+def _basic(
+    key: str,
+    name: str,
+    unit: str,
+    scope: str,
+    order: int,
+    *,
+    origin: IndicatorOrigin = IndicatorOrigin.SOURCED,
+    decimal_places: int = 0,
+) -> IndicatorSeed:
     return IndicatorSeed(
         key=key,
         name=name,
         unit=unit,
         description=f"{scope} {_BASIC_SOURCE}",
-        origin=IndicatorOrigin.SOURCED,
-        decimal_places=0,
+        origin=origin,
+        decimal_places=decimal_places,
         display_order=order,
         context="education",
     )
 
 
-BASIC_EDUCATION_CATALOG: tuple[IndicatorSeed, ...] = (
-    IndicatorSeed(
-        key="basic_daycare_coverage",
-        name="Cobertura de creche pública",
-        unit="%",
-        description=(
-            "Matrículas em creche pública divididas pela população de 0 a 3 anos do Censo "
-            "2022 (IBGE, tabela 9514). Só a partir de 2022: antes, a população do Censo não "
-            "representa as crianças do ano. A matrícula conta onde fica a creche, não onde a "
-            "criança mora, e um município que atende vizinhos pode passar de 100%. "
-            f"{_BASIC_SOURCE}"
+def _stage_seeds(index: int, stage: str) -> tuple[IndicatorSeed, ...]:
+    offer, place, ages = BASIC_STAGES[stage]
+    order = 310 + 10 * index
+    seeds = (
+        _basic(
+            basic_key(stage, "schools"),
+            f"Escolas públicas {offer}",
+            "schools",
+            f"Escolas públicas {offer} (com matrícula na etapa) no ano.",
+            order,
         ),
+        _basic(
+            basic_key(stage, "enrollment"),
+            f"Matrículas {place}",
+            "enrollments",
+            f"Matrículas {place}.",
+            order + 1,
+        ),
+    )
+    if ages is None:
+        return seeds
+    coverage = _basic(
+        basic_key(stage, "coverage"),
+        # O nome vai no título da legenda: sem "público", que a descrição já diz.
+        f"Atendimento {place.removesuffix(' pública').removesuffix(' público')} ({ages})",
+        "%",
+        (
+            f"Taxa bruta: matrículas {place} divididas pela população de {ages} do Censo "
+            "2022 (IBGE, tabela 9514). Só a partir de 2022: antes, a população do Censo não "
+            "representa as crianças do ano. A matrícula conta onde fica a escola, não onde o "
+            "aluno mora, e inclui alunos fora da idade; por isso um município pode passar "
+            "de 100%."
+        ),
+        order + 2,
         origin=IndicatorOrigin.DERIVED,
         decimal_places=1,
-        display_order=300,
-        context="education",
-    ),
-    _basic(
-        "basic_daycare_enrollment",
-        "Matrículas em creche pública",
-        "enrollments",
-        "Matrículas de creche (0 a 3 anos).",
-        310,
-    ),
-    _basic(
-        "basic_daycares",
-        "Creches públicas",
-        "daycares",
-        "Escolas públicas com matrícula de creche no ano.",
-        320,
-    ),
+    )
+    return (*seeds, coverage)
+
+
+BASIC_EDUCATION_CATALOG: tuple[IndicatorSeed, ...] = (
     _basic(
         "basic_schools",
         "Escolas públicas",
         "schools",
         "Escolas públicas com matrícula na educação básica no ano.",
-        330,
+        300,
     ),
     _basic(
         "basic_enrollment",
         "Matrículas na educação básica pública",
         "enrollments",
         "Matrículas da creche ao ensino médio, incluindo EJA e educação profissional.",
-        340,
+        301,
     ),
+    *(seed for index, stage in enumerate(BASIC_STAGES) for seed in _stage_seeds(index, stage)),
 )
+# Chaves da primeira versão da educação básica, trocadas pelo padrão por etapa.
+RETIRED_BASIC_KEYS = ("basic_daycares",)
 
 
 async def seed_catalog(session: AsyncSession, catalog: tuple[IndicatorSeed, ...] = CATALOG) -> int:

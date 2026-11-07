@@ -1,9 +1,9 @@
 """Importa a educação básica do contexto Educação: o Censo Escolar do INEP (ADR-23).
 
-Escolas e creches públicas por município viram indicadores do motor
-(`context=education`), somados por UF, região e Brasil. A cobertura de creche
-divide as matrículas pela população de 0 a 3 anos do Censo 2022 do IBGE, só nos
-anos a partir dele. Tudo é baixado e lido antes de abrir a transação, como em
+Escolas públicas e matrículas por município e etapa viram indicadores do motor
+(`context=education`), somados por UF, região e Brasil. O atendimento de cada
+etapa divide as matrículas pela população da faixa etária dela no Censo 2022 do
+IBGE, só nos anos a partir dele. Tudo é baixado e lido antes de abrir a transação, como em
 `import_education`; cada ano regravado apaga os valores antigos dele.
 """
 
@@ -20,7 +20,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.jobs._runner import RunReport, job_session, run_job, upsert_dataset
 from app.jobs.import_education import parse_years
 from app.jobs.import_indicators import persist
-from app.jobs.seed_indicators import BASIC_EDUCATION_CATALOG, seed_catalog
+from app.jobs.seed_indicators import (
+    BASIC_EDUCATION_CATALOG,
+    RETIRED_BASIC_KEYS,
+    basic_key,
+    seed_catalog,
+)
 from app.models import Indicator, IndicatorValue
 from app.providers import inep_basic_education as inep
 from app.providers.base import http_client
@@ -32,25 +37,29 @@ DEFAULT_YEARS = tuple(range(2019, 2026))
 DEFAULT_CACHE = Path("/tmp/brasil-lens-inep")
 COUNTRY_CODE = "BR"
 # Antes do Censo Demográfico de 2022, a população dele não representa as crianças
-# de 0 a 3 anos do ano (nascimentos caem ~3% ao ano): melhor não ter cobertura.
+# do ano (nascimentos caem ~3% ao ano): melhor não ter atendimento.
 COVERAGE_FIRST_YEAR = 2022
-COVERAGE_KEY = "basic_daycare_coverage"
 _HUNDRED = Decimal(100)
 _ONE_DECIMAL = Decimal("0.1")
-# Tabela 9514 (Censo 2022): população residente por idade simples. Total de sexo
-# e de forma de declaração; idades de menos de 1 ano a 3 anos, somadas.
-POPULATION_QUERY = agregados.AggregateQuery(
-    table="9514",
-    variable="93",
-    periods="2022",
-    classification="2[6794]|287[6557,6558,6559,6560]|286[113635]",
-)
-_COUNTS = {
-    "basic_daycare_enrollment": "daycare_enrollment",
-    "basic_daycares": "daycares",
-    "basic_schools": "schools",
-    "basic_enrollment": "enrollment",
+# Tabela 9514 (Censo 2022): população residente por idade simples. As categorias
+# 6557 a 6574 são as idades de menos de 1 ano a 17 anos, em sequência.
+_FIRST_AGE_CATEGORY = 6557
+# Só as etapas com atendimento (ver BASIC_STAGES): creche e ensino médio.
+AGE_BANDS = {
+    "daycare": range(0, 4),
+    "high_school": range(15, 18),
 }
+
+
+def population_query(ages: range) -> agregados.AggregateQuery:
+    """Soma das idades da faixa, com o total de sexo e de forma de declaração."""
+    categories = ",".join(str(_FIRST_AGE_CATEGORY + age) for age in ages)
+    return agregados.AggregateQuery(
+        table="9514",
+        variable="93",
+        periods="2022",
+        classification=f"2[6794]|287[{categories}]|286[113635]",
+    )
 
 
 def _scopes(code: str) -> tuple[str, ...]:
@@ -58,50 +67,63 @@ def _scopes(code: str) -> tuple[str, ...]:
     return (code, code[:2], code[:1], COUNTRY_CODE)
 
 
-def basic_totals(census: inep.Census, children: dict[str, int]) -> dict[str, dict[str, Decimal]]:
+def _sum_by_scope(values: Iterable[tuple[str, int]]) -> dict[str, int]:
+    sums: dict[str, int] = {}
+    for municipality, value in values:
+        for scope in _scopes(municipality):
+            sums[scope] = sums.get(scope, 0) + value
+    return sums
+
+
+def basic_totals(
+    census: inep.Census, population: dict[str, dict[str, int]]
+) -> dict[str, dict[str, Decimal]]:
     """Valores por indicador e território.
 
-    Todo município do Censo tem escola pública, então todos recebem valor; sem
-    creche, o zero é medido. A cobertura de UF, região e Brasil divide a soma das
-    matrículas pela soma das crianças, não é a média dos municípios.
+    Todo município do Censo tem escola pública, então todos recebem valor em
+    cada etapa; sem a etapa, o zero é medido. O atendimento de UF, região e
+    Brasil divide a soma das matrículas pela soma da população da faixa, não é a
+    média dos municípios.
     """
-    sums: dict[str, dict[str, int]] = {key: {} for key in _COUNTS}
-    for municipality, counts in census.municipalities.items():
-        for key, attribute in _COUNTS.items():
-            value = getattr(counts, attribute)
-            for scope in _scopes(municipality):
-                sums[key][scope] = sums[key].get(scope, 0) + value
-    totals = {
-        key: {code: Decimal(value) for code, value in values.items()}
-        for key, values in sums.items()
-    }
-    if census.year < COVERAGE_FIRST_YEAR or not children:
+    municipalities = census.municipalities.items()
+    totals: dict[str, dict[str, Decimal]] = {}
+    for stage in inep.STAGES:
+        for metric in ("schools", "enrollment"):
+            sums = _sum_by_scope(
+                (code, getattr(counts, metric)[stage]) for code, counts in municipalities
+            )
+            totals[basic_key(stage, metric)] = {code: Decimal(v) for code, v in sums.items()}
+    if census.year < COVERAGE_FIRST_YEAR:
         return totals
-    population: dict[str, int] = {}
-    for municipality, value in children.items():
-        for scope in _scopes(municipality):
-            population[scope] = population.get(scope, 0) + value
-    enrollment = sums["basic_daycare_enrollment"]
-    totals[COVERAGE_KEY] = {
-        code: (Decimal(enrollment[code]) * _HUNDRED / people).quantize(_ONE_DECIMAL)
-        for code, people in population.items()
-        # Município criado depois do Censo 2022 não tem população; o que deixou de
-        # ter escola pública (não aconteceu até 2025) também ficaria de fora.
-        if people > 0 and code in enrollment
-    }
+    for stage, people_by_municipality in population.items():
+        people = _sum_by_scope(people_by_municipality.items())
+        enrollment = totals[basic_key(stage, "enrollment")]
+        totals[basic_key(stage, "coverage")] = {
+            code: (enrollment[code] * _HUNDRED / count).quantize(_ONE_DECIMAL)
+            for code, count in people.items()
+            # Município criado depois do Censo 2022 não tem população; o que deixou
+            # de ter escola pública (não aconteceu até 2025) também ficaria de fora.
+            if count > 0 and code in enrollment
+        }
     return totals
 
 
-async def fetch_children() -> dict[str, int]:
-    """Crianças de 0 a 3 anos por município no Censo 2022."""
+async def fetch_population() -> dict[str, dict[str, int]]:
+    """População de cada faixa etária das etapas, por município, no Censo 2022.
+
+    Uma consulta por faixa: todas as idades juntas passam de 100 mil valores.
+    """
+    population: dict[str, dict[str, int]] = {}
     async with http_client() as client:
-        observations, _ = await agregados.fetch_observations(
-            client,
-            POPULATION_QUERY,
-            localities="N6[all]",
-            accept_levels=frozenset({"N6"}),
-        )
-    return {item.ibge_code: int(item.value) for item in observations}
+        for stage, ages in AGE_BANDS.items():
+            observations, _ = await agregados.fetch_observations(
+                client,
+                population_query(ages),
+                localities="N6[all]",
+                accept_levels=frozenset({"N6"}),
+            )
+            population[stage] = {item.ibge_code: int(item.value) for item in observations}
+    return population
 
 
 def _observations(values: dict[str, Decimal], year: int) -> list[IndicatorObservation]:
@@ -114,7 +136,7 @@ def _observations(values: dict[str, Decimal], year: int) -> list[IndicatorObserv
 async def _replace_year(
     session: AsyncSession,
     census: inep.Census,
-    children: dict[str, int],
+    population: dict[str, dict[str, int]],
     *,
     dataset_id: int,
     run_id: int,
@@ -122,7 +144,7 @@ async def _replace_year(
 ) -> dict[str, int]:
     year = census.year
     written = 0
-    totals = basic_totals(census, children)
+    totals = basic_totals(census, population)
     for seed in BASIC_EDUCATION_CATALOG:
         indicator_id = indicators[seed.key]
         await session.execute(
@@ -139,8 +161,8 @@ async def _replace_year(
         )
     return {
         "municipalities": len(census.municipalities),
-        "schools": sum(item.schools for item in census.municipalities.values()),
-        "daycares": sum(item.daycares for item in census.municipalities.values()),
+        "schools": sum(item.schools["all"] for item in census.municipalities.values()),
+        "daycares": sum(item.schools["daycare"] for item in census.municipalities.values()),
         "values": written,
     }
 
@@ -153,8 +175,9 @@ async def ingest(years: Iterable[int], cache_dir: Path) -> int:
         censuses = [
             inep.read_census(await inep.download(client, year, cache_dir), year) for year in years
         ]
-    children = await fetch_children() if years[-1] >= COVERAGE_FIRST_YEAR else {}
+    population = await fetch_population() if years[-1] >= COVERAGE_FIRST_YEAR else {}
     async with job_session(job=JOB_NAME, source="inep") as (session, run_id, report):
+        await session.execute(delete(Indicator).where(Indicator.key.in_(RETIRED_BASIC_KEYS)))
         await seed_catalog(session, BASIC_EDUCATION_CATALOG)
         rows = await session.execute(
             select(Indicator.key, Indicator.id).where(
@@ -173,7 +196,7 @@ async def ingest(years: Iterable[int], cache_dir: Path) -> int:
             details = await _replace_year(
                 session,
                 census,
-                children,
+                population,
                 dataset_id=dataset_id,
                 run_id=run_id,
                 indicators=indicators,
