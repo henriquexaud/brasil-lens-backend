@@ -210,10 +210,17 @@ def client(timeout: float = 900) -> httpx.AsyncClient:
 async def download(client: httpx.AsyncClient, year: int, directory: Path) -> Path:
     """Baixa o zip do ano em disco (streaming), reaproveitando um download anterior."""
     target = directory / f"microdados_censo_da_educacao_superior_{year}.zip"
+    return await download_file(client, DOWNLOAD_URL.format(year=year), target, year=year)
+
+
+async def download_file(client: httpx.AsyncClient, url: str, target: Path, *, year: int) -> Path:
+    """Grava `url` em `target` por streaming; um arquivo já baixado é reaproveitado.
+
+    Serve aos dois Censos do INEP (superior e escolar), que saem do mesmo servidor.
+    """
     if target.is_file():
         return target
     partial = target.with_suffix(".part")
-    url = DOWNLOAD_URL.format(year=year)
     try:
         async with client.stream("GET", url) as response:
             if response.status_code != httpx.codes.OK:

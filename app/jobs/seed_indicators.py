@@ -294,6 +294,75 @@ EDUCATION_CATALOG: tuple[IndicatorSeed, ...] = tuple(
 RETIRED_EDUCATION_KEYS = ("higher_ed_public_enrollment",)
 
 
+# Educação básica (ADR-23): escolas e creches das redes públicas no Censo Escolar
+# do INEP, pelo município da escola. O Censo cobre todas as escolas: zero é medição.
+_BASIC_SOURCE = (
+    "Redes federal, estadual e municipal, pelo município da escola (Censo Escolar, "
+    "INEP). Escolas privadas, inclusive as conveniadas com o poder público, não entram."
+)
+
+
+def _basic(key: str, name: str, unit: str, scope: str, order: int) -> IndicatorSeed:
+    return IndicatorSeed(
+        key=key,
+        name=name,
+        unit=unit,
+        description=f"{scope} {_BASIC_SOURCE}",
+        origin=IndicatorOrigin.SOURCED,
+        decimal_places=0,
+        display_order=order,
+        context="education",
+    )
+
+
+BASIC_EDUCATION_CATALOG: tuple[IndicatorSeed, ...] = (
+    IndicatorSeed(
+        key="basic_daycare_coverage",
+        name="Cobertura de creche pública",
+        unit="%",
+        description=(
+            "Matrículas em creche pública divididas pela população de 0 a 3 anos do Censo "
+            "2022 (IBGE, tabela 9514). Só a partir de 2022: antes, a população do Censo não "
+            "representa as crianças do ano. A matrícula conta onde fica a creche, não onde a "
+            "criança mora, e um município que atende vizinhos pode passar de 100%. "
+            f"{_BASIC_SOURCE}"
+        ),
+        origin=IndicatorOrigin.DERIVED,
+        decimal_places=1,
+        display_order=300,
+        context="education",
+    ),
+    _basic(
+        "basic_daycare_enrollment",
+        "Matrículas em creche pública",
+        "enrollments",
+        "Matrículas de creche (0 a 3 anos).",
+        310,
+    ),
+    _basic(
+        "basic_daycares",
+        "Creches públicas",
+        "daycares",
+        "Escolas públicas com matrícula de creche no ano.",
+        320,
+    ),
+    _basic(
+        "basic_schools",
+        "Escolas públicas",
+        "schools",
+        "Escolas públicas com matrícula na educação básica no ano.",
+        330,
+    ),
+    _basic(
+        "basic_enrollment",
+        "Matrículas na educação básica pública",
+        "enrollments",
+        "Matrículas da creche ao ensino médio, incluindo EJA e educação profissional.",
+        340,
+    ),
+)
+
+
 async def seed_catalog(session: AsyncSession, catalog: tuple[IndicatorSeed, ...] = CATALOG) -> int:
     written = 0
     for seed in catalog:

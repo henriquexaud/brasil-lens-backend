@@ -197,7 +197,7 @@ def _print(report: RunReport) -> None:
     )
 
 
-def _years(value: str) -> list[int]:
+def parse_years(value: str) -> list[int]:
     try:
         if "-" in value:
             start, end = (int(part) for part in value.split("-", 1))
@@ -213,7 +213,7 @@ async def main() -> int:
     )
     parser.add_argument(
         "--years",
-        type=_years,
+        type=parse_years,
         default=list(DEFAULT_YEARS),
         help="Anos do Censo (ex.: 2024, 2022,2024 ou 2019-2024). Padrão: 2019-2024.",
     )

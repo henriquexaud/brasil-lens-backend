@@ -12,7 +12,7 @@ async def version(session: AsyncSession) -> str:
         text("""
         SELECT COALESCE(MAX(id), 0) FROM ingestion_runs
          WHERE job IN ('seed_indicators', 'import_indicators', 'import_environment',
-                       'import_education')
+                       'import_education', 'import_basic_education')
            AND status = 'succeeded'
     """)
     )
