@@ -10,8 +10,11 @@ from app.core.errors import (
     ProviderRateLimitedError,
     RouteNotFoundError,
     RoutePointUnreachableError,
+    TerritoryNotFoundError,
 )
+from app.models import TerritoryLevel
 from app.providers import osm_routing as provider
+from app.repositories import territories as territories_repo
 from app.services import routing
 
 
@@ -169,3 +172,66 @@ async def test_busca_curta_nao_consulta_a_fonte(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(provider, "search_places", boom)
     assert (await routing.search_places("sp")).places == []
+
+
+async def test_sede_e_o_no_place_de_mesmo_nome_na_mesma_uf() -> None:
+    payload = {
+        "features": [
+            _feature(name="Altamira", osm_value="suburb", state="Pará", coords=[-49.9, -6.0]),
+            _feature(name="Altamira", osm_value="municipality", countrycode="AR", state="Pará"),
+            _feature(name="Altamira", osm_value="village", state="Bahia", coords=[-40.1, -14.5]),
+            _feature(
+                name="Altamira", osm_value="municipality", state="Pará", coords=[-52.21, -3.2]
+            ),
+        ]
+    }
+    async with _client(lambda _: httpx.Response(200, json=payload)) as client:
+        assert await provider.find_seat(client, "Altamira", "Pará") == (-3.2, -52.21)
+        assert await provider.find_seat(client, "Altamira", "Goiás") is None
+
+
+def _row(**fields: Any) -> Any:
+    base = {
+        "ibge_code": "29",
+        "name": "Bahia",
+        "level": TerritoryLevel.STATE,
+        "abbreviation": "BA",
+        "parent_ibge_code": None,
+        "parent_name": None,
+        "parent_level": None,
+        "capital_ibge_code": None,
+        "capital_name": None,
+        "bbox": None,
+    }
+    return territories_repo.TerritoryRow(**{**base, **fields})
+
+
+async def test_estado_leva_a_capital_e_municipio_a_sede(monkeypatch: pytest.MonkeyPatch) -> None:
+    rows = {
+        "29": _row(),
+        "1500602": _row(
+            ibge_code="1500602",
+            name="Altamira",
+            level=TerritoryLevel.MUNICIPALITY,
+            abbreviation=None,
+            parent_ibge_code="15",
+            parent_name="Pará",
+        ),
+    }
+
+    async def get_by_code(_session: Any, code: str) -> Any:
+        return rows.get(code)
+
+    async def seat(_client: Any, name: str, state: str) -> Any:
+        return (-3.2, -52.21) if (name, state) == ("Altamira", "Pará") else None
+
+    monkeypatch.setattr(territories_repo, "get_by_code", get_by_code)
+    monkeypatch.setattr(provider, "find_seat", seat)
+    routing._seat_cache.clear()
+
+    capital = await routing.territory_point(None, "29")  # type: ignore[arg-type]
+    assert (capital.name, capital.detail, capital.latitude) == ("Salvador", "Capital, BA", -12.9714)
+    town = await routing.territory_point(None, "1500602")  # type: ignore[arg-type]
+    assert (town.name, town.detail, town.latitude) == ("Altamira", "PA", -3.2)
+    with pytest.raises(TerritoryNotFoundError):
+        await routing.territory_point(None, "99")  # type: ignore[arg-type]

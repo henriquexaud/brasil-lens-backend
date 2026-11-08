@@ -12,6 +12,7 @@ from app.core.errors import (
     RouteNotFoundError,
     RoutePointUnreachableError,
 )
+from app.core.text import normalize_text
 from app.schemas.routing import Place, RouteLeg, RouteProfile, RouteResult, RouteWaypoint
 
 # Oeste, sul, leste, norte; inclui Fernando de Noronha (Trindade fica de fora).
@@ -124,6 +125,35 @@ async def search_places(
         return _places(response.json(), limit)
     except (httpx.HTTPError, ValueError) as exc:
         raise ProviderError("Não foi possível buscar endereços no OpenStreetMap.") from exc
+
+
+SEAT_KINDS = frozenset({"city", "town", "village", "municipality"})
+
+
+async def find_seat(client: httpx.AsyncClient, name: str, state: str) -> tuple[float, float] | None:
+    """Sede de um município: o nó `place` do OSM com o mesmo nome, na mesma UF."""
+    try:
+        response = await client.get(
+            "/api", params={"q": f"{name}, {state}", "osm_tag": "place", "limit": 10}
+        )
+        _check(response, "endereços")
+        response.raise_for_status()
+        features = response.json().get("features", [])
+    except (httpx.HTTPError, ValueError, AttributeError) as exc:
+        raise ProviderError("Não foi possível localizar a sede no OpenStreetMap.") from exc
+    wanted = normalize_text(name)
+    for feature in features:
+        props = feature.get("properties") or {}
+        coords = (feature.get("geometry") or {}).get("coordinates") or []
+        if (
+            props.get("countrycode") == "BR"
+            and props.get("state") == state
+            and props.get("osm_value") in SEAT_KINDS
+            and normalize_text(props.get("name") or "") == wanted
+            and len(coords) == 2
+        ):
+            return round(coords[1], 6), round(coords[0], 6)
+    return None
 
 
 async def reverse_place(

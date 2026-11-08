@@ -108,6 +108,15 @@ async def places(
 
 
 @router.get(
+    "/territories/{code}/point",
+    response_model=Place,
+    summary="Ponto de rota de um estado (capital) ou município (sede)",
+)
+async def territory_point(session: Session, code: str) -> Place:
+    return await routing.territory_point(session, code)
+
+
+@router.get(
     "/places/reverse", response_model=Place | None, summary="Endereço de um ponto do mapa (OSM)"
 )
 async def reverse_place(

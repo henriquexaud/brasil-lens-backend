@@ -9,12 +9,16 @@ from __future__ import annotations
 import asyncio
 
 import httpx
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cache import TTLCache
 from app.core.config import settings
-from app.core.errors import InvalidParameterError
+from app.core.errors import InvalidParameterError, TerritoryNotFoundError
 from app.core.text import normalize_text
+from app.models import TerritoryLevel
 from app.providers import osm_routing as provider
+from app.providers.open_meteo import CAPITALS
+from app.repositories import territories as territories_repo
 from app.schemas.routing import Place, PlaceSearch, RouteProfile, RouteResult
 
 MAX_POINTS = 7  # origem, até cinco paradas e destino
@@ -24,6 +28,7 @@ USER_AGENT = "brasil-lens/0.1 (+https://www.brasillens.com.br)"
 _places_cache: TTLCache[list[Place]] = TTLCache(ttl_seconds=24 * 3600, max_entries=1024)
 _reverse_cache: TTLCache[list[Place]] = TTLCache(ttl_seconds=24 * 3600, max_entries=512)
 _route_cache: TTLCache[RouteResult] = TTLCache(ttl_seconds=3600, max_entries=256)
+_seat_cache: TTLCache[Place] = TTLCache(ttl_seconds=30 * 24 * 3600, max_entries=2048)
 _photon_slots = asyncio.Semaphore(2)
 _osrm_slots = asyncio.Semaphore(2)
 
@@ -101,3 +106,43 @@ async def get_route(profile: RouteProfile, points: list[tuple[float, float]]) ->
             cached = await provider.fetch_route(client, profile, list(key[1]))
         _route_cache.set(key, cached)
     return cached
+
+
+async def territory_point(session: AsyncSession, code: str) -> Place:
+    """Ponto de rota de um estado (a capital) ou município (a sede)."""
+    cached = _seat_cache.get(code)
+    if cached is not None:
+        return cached
+    row = await territories_repo.get_by_code(session, code)
+    if row is None or row.level not in (TerritoryLevel.STATE, TerritoryLevel.MUNICIPALITY):
+        raise TerritoryNotFoundError(code)
+    if row.level == TerritoryLevel.STATE:
+        capital = next((c for c in CAPITALS if c[0] == row.abbreviation), None)
+        if capital is None:
+            raise TerritoryNotFoundError(code)
+        uf, name, latitude, longitude = capital
+        place = Place(
+            id=f"capital:{code}",
+            name=name,
+            detail=f"Capital, {uf}",
+            latitude=latitude,
+            longitude=longitude,
+        )
+    else:
+        point = None
+        if row.parent_name:
+            async with _photon_slots, _client(settings.photon_url) as client:
+                point = await provider.find_seat(client, row.name, row.parent_name)
+        # Sem a sede no OSM, um ponto dentro do município; a rota encaixa na via mais próxima.
+        point = point or await territories_repo.get_weather_point(session, code)
+        if point is None:
+            raise TerritoryNotFoundError(code)
+        place = Place(
+            id=f"seat:{code}",
+            name=row.name,
+            detail=provider.UF.get(row.parent_name or "", row.parent_name),
+            latitude=point[0],
+            longitude=point[1],
+        )
+    _seat_cache.set(code, place)
+    return place
