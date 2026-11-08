@@ -64,6 +64,22 @@ class InvalidParameterError(DomainError):
         super().__init__(message, parameter=parameter, **details)
 
 
+class RouteNotFoundError(DomainError):
+    status_code = 422
+    code = "route_not_found"
+
+    def __init__(self) -> None:
+        super().__init__("Não há caminho por vias entre esses pontos com este meio de transporte.")
+
+
+class RoutePointUnreachableError(DomainError):
+    status_code = 422
+    code = "route_point_unreachable"
+
+    def __init__(self) -> None:
+        super().__init__("Um dos pontos fica longe de qualquer via. Escolha um lugar mais próximo.")
+
+
 class ProviderError(DomainError):
     status_code = 502
     code = "provider_error"

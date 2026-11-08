@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_session
 from app.api.http import etag_matches
 from app.schemas.common import to_json
+from app.schemas.routing import Place, PlaceSearch, RouteProfile, RouteResult
 from app.schemas.transport import (
     TransportCatalog,
     TransportIdentify,
@@ -14,6 +15,7 @@ from app.schemas.transport import (
     TransportNetwork,
     TransportSummary,
 )
+from app.services import routing
 from app.services import transport as service
 from app.services.viewport import parse_bbox
 
@@ -93,3 +95,33 @@ async def tile(session: Session, version: int, zoom: int, x: int, y: int) -> Res
         return Response(status_code=204, headers=headers)
     headers["Content-Encoding"] = "gzip"
     return Response(data, media_type="application/vnd.mapbox-vector-tile", headers=headers)
+
+
+@router.get("/places", response_model=PlaceSearch, summary="Endereços e lugares no Brasil (OSM)")
+async def places(
+    q: Annotated[str, Query(max_length=120)],
+    latitude: Annotated[float | None, Query(ge=-90, le=90)] = None,
+    longitude: Annotated[float | None, Query(ge=-180, le=180)] = None,
+) -> PlaceSearch:
+    near = (latitude, longitude) if latitude is not None and longitude is not None else None
+    return await routing.search_places(q, near)
+
+
+@router.get(
+    "/places/reverse", response_model=Place | None, summary="Endereço de um ponto do mapa (OSM)"
+)
+async def reverse_place(
+    latitude: Annotated[float, Query(ge=-90, le=90)],
+    longitude: Annotated[float, Query(ge=-180, le=180)],
+) -> Place | None:
+    return await routing.reverse_place(latitude, longitude)
+
+
+@router.get("/route", response_model=RouteResult, summary="Rota por vias entre pontos (OSRM)")
+async def route(
+    points: Annotated[
+        str, Query(max_length=400, description="'lat,lon;lat,lon;…' na ordem da viagem")
+    ],
+    profile: RouteProfile = "car",
+) -> RouteResult:
+    return await routing.get_route(profile, routing.parse_points(points))

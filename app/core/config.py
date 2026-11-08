@@ -67,6 +67,11 @@ class Settings(BaseSettings):
     deter_http_timeout: float = 60.0
     fire_hotspots_cache_ttl_seconds: int = 600
 
+    # Rotas e endereços do OpenStreetMap (ADR-24): servidores públicos de uso justo.
+    osrm_url: str = "https://routing.openstreetmap.de"
+    photon_url: str = "https://photon.komoot.io"
+    routing_http_timeout: float = 15.0
+
     geometry_overview_tolerance: float = 0.005
     geometry_detail_tolerance: float = 0.001
 
