@@ -66,3 +66,26 @@ class EducationInstitutionDetail(CamelModel):
     distance_enrollment: int
     courses: int
     campuses: list[EducationCampus]
+
+
+# Etapas da aba Básica (ADR-23), como nos indicadores `basic_*`.
+BasicStage = Literal["all", "early_childhood", "elementary", "high_school"]
+
+
+class BasicSchoolSummary(CamelModel):
+    """Escola pública do município, com as matrículas dela na etapa pedida."""
+
+    code: int
+    name: str
+    network: EducationCategory
+    enrollment: int
+
+
+class BasicSchools(CamelModel):
+    """Escolas públicas de um município no Censo Escolar mais recente."""
+
+    code: str
+    name: str
+    year: int | None
+    stage: BasicStage
+    schools: list[BasicSchoolSummary]

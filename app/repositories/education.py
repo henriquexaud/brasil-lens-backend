@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.engine import Row
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models import BasicSchool
 
 
 async def fetch_version(session: AsyncSession) -> int:
@@ -98,5 +100,41 @@ async def fetch_campuses(session: AsyncSession, code: int, year: int) -> list[Ro
          ORDER BY o.enrollment DESC, m.name
     """),
         {"code": code, "year": year},
+    )
+    return list(result.all())
+
+
+async def fetch_basic_version(session: AsyncSession) -> int:
+    """Última ingestão concluída do Censo Escolar, chave de cache da lista de escolas."""
+    result = await session.execute(
+        text(
+            "SELECT COALESCE(MAX(id), 0) FROM ingestion_runs "
+            "WHERE job = 'import_basic_education' AND status = 'succeeded'"
+        )
+    )
+    return int(result.scalar_one())
+
+
+_STAGE_COLUMNS = {
+    "all": BasicSchool.enrollment,
+    "early_childhood": BasicSchool.early_childhood_enrollment,
+    "elementary": BasicSchool.elementary_enrollment,
+    "high_school": BasicSchool.high_school_enrollment,
+}
+
+
+async def fetch_schools(session: AsyncSession, territory_id: int, stage: str) -> list[Row[Any]]:
+    """Escolas do município com matrícula na etapa, da maior para a menor."""
+    column = _STAGE_COLUMNS[stage]
+    result = await session.execute(
+        select(
+            BasicSchool.code,
+            BasicSchool.name,
+            BasicSchool.network,
+            BasicSchool.year,
+            column.label("enrollment"),
+        )
+        .where(BasicSchool.territory_id == territory_id, column > 0)
+        .order_by(column.desc(), BasicSchool.name)
     )
     return list(result.all())

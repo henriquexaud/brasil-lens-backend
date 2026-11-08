@@ -1,6 +1,7 @@
 from app.models.education import (
     EDUCATION_CATEGORIES,
     EDUCATION_ORGANIZATIONS,
+    BasicSchool,
     EducationInstitution,
     EducationOffer,
 )
@@ -39,6 +40,7 @@ __all__ = [
     "EXPECTED_PARENT_LEVEL",
     "REQUIRES_PARENT",
     "TRANSPORT_LAYERS",
+    "BasicSchool",
     "Dataset",
     "EducationInstitution",
     "EducationOffer",

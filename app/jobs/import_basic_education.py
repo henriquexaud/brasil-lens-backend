@@ -3,8 +3,9 @@
 Escolas públicas e matrículas por município e etapa viram indicadores do motor
 (`context=education`), somados por UF, região e Brasil. O atendimento de cada
 etapa divide as matrículas pela população da faixa etária dela no Censo 2022 do
-IBGE, só nos anos a partir dele. Tudo é baixado e lido antes de abrir a transação, como em
-`import_education`; cada ano regravado apaga os valores antigos dele.
+IBGE, só nos anos a partir dele. As escolas do último ano pedido substituem a lista
+de escolas por município (`basic_schools`). Tudo é baixado e lido antes de abrir a
+transação, como em `import_education`; cada ano regravado apaga os valores antigos dele.
 """
 
 from __future__ import annotations
@@ -14,9 +15,10 @@ from collections.abc import Iterable
 from decimal import Decimal
 from pathlib import Path
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.results import affected_rows
 from app.jobs._runner import RunReport, job_session, run_job, upsert_dataset
 from app.jobs.import_education import parse_years
 from app.jobs.import_indicators import persist
@@ -26,7 +28,7 @@ from app.jobs.seed_indicators import (
     basic_key,
     seed_catalog,
 )
-from app.models import Indicator, IndicatorValue
+from app.models import BasicSchool, Indicator, IndicatorValue
 from app.providers import inep_basic_education as inep
 from app.providers.base import http_client
 from app.providers.ibge import agregados
@@ -49,6 +51,21 @@ AGE_BANDS = {
     "early_childhood": range(0, 6),
     "high_school": range(15, 18),
 }
+
+INSERT_SCHOOLS_SQL = text("""
+    INSERT INTO basic_schools
+        (code, year, territory_id, name, network, enrollment, early_childhood_enrollment,
+         elementary_enrollment, high_school_enrollment, dataset_id)
+    SELECT source.code, :year, t.id, source.name, source.network, source.enrollment,
+           source.early_childhood, source.elementary, source.high_school, :dataset_id
+      FROM unnest(CAST(:codes AS integer[]), CAST(:municipalities AS text[]),
+                  CAST(:names AS text[]), CAST(:networks AS text[]),
+                  CAST(:enrollment AS integer[]), CAST(:early_childhood AS integer[]),
+                  CAST(:elementary AS integer[]), CAST(:high_school AS integer[]))
+           AS source(code, municipality, name, network, enrollment, early_childhood,
+                     elementary, high_school)
+      JOIN territories t ON t.ibge_code = source.municipality AND t.level = 'municipality'
+""")
 
 
 def population_query(ages: range) -> agregados.AggregateQuery:
@@ -126,6 +143,30 @@ async def fetch_population() -> dict[str, dict[str, int]]:
     return population
 
 
+async def replace_schools(session: AsyncSession, census: inep.Census, dataset_id: int) -> int:
+    """Troca a lista inteira pelas escolas do Censo; devolve quantas têm município na malha."""
+    await session.execute(delete(BasicSchool))
+    schools = census.schools
+    return affected_rows(
+        await session.execute(
+            INSERT_SCHOOLS_SQL,
+            {
+                "year": census.year,
+                "dataset_id": dataset_id,
+                "codes": [item.code for item in schools],
+                "municipalities": [item.municipality for item in schools],
+                "names": [item.name for item in schools],
+                "networks": [item.network for item in schools],
+                **{
+                    stage: [item.enrollment[stage] for item in schools]
+                    for stage in ("early_childhood", "elementary", "high_school")
+                },
+                "enrollment": [item.enrollment["all"] for item in schools],
+            },
+        )
+    )
+
+
 def _observations(values: dict[str, Decimal], year: int) -> list[IndicatorObservation]:
     return [
         IndicatorObservation(ibge_code=code, reference_year=year, value=value)
@@ -175,7 +216,10 @@ async def ingest(years: Iterable[int], cache_dir: Path) -> int:
     async with inep.client() as client:
         # Sequencial: um zip por ano (~30 MB; o de 2025, sem compressão, ~540 MB).
         censuses = [
-            inep.read_census(await inep.download(client, year, cache_dir), year) for year in years
+            inep.read_census(
+                await inep.download(client, year, cache_dir), year, schools=year == years[-1]
+            )
+            for year in years
         ]
     population = await fetch_population() if years[-1] >= COVERAGE_FIRST_YEAR else {}
     async with job_session(job=JOB_NAME, source="inep") as (session, run_id, report):
@@ -206,6 +250,10 @@ async def ingest(years: Iterable[int], cache_dir: Path) -> int:
             report.processed += details["schools"]
             report.written += details["values"]
             report.details[str(census.year)] = details
+        listed = await replace_schools(session, censuses[-1], dataset_id)
+        # Município fora da malha (criado depois dela) fica sem lista.
+        report.details["schools_listed"] = listed
+        report.details["schools_without_territory"] = len(censuses[-1].schools) - listed
         await session.commit()
     _print(report)
     return 0

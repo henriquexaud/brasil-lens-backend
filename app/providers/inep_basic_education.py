@@ -27,7 +27,7 @@ import httpx
 from app.core.errors import ProviderError
 from app.providers.inep_higher_education import client, download_file
 
-__all__ = ["STAGES", "Census", "Counts", "client", "download", "read_census"]
+__all__ = ["STAGES", "Census", "Counts", "School", "client", "download", "read_census"]
 
 SOURCE = "INEP"
 DATASET_URL = (
@@ -37,7 +37,7 @@ DOWNLOAD_URL = "https://download.inep.gov.br/dados_abertos/microdados_censo_esco
 # O INEP publicou o de 2025 com um sublinhado a mais no nome do arquivo.
 _FILE_NAMES = {2025: "2025_"}
 
-PUBLIC_NETWORKS = frozenset({"1", "2", "3"})
+NETWORKS = {"1": "federal", "2": "state", "3": "municipal"}
 # Etapa → coluna de matrículas da escola. "all" é a educação básica inteira (com
 # EJA e educação profissional), que decide se a escola conta.
 STAGES = {
@@ -47,7 +47,7 @@ STAGES = {
     "elementary": "QT_MAT_FUND",
     "high_school": "QT_MAT_MED",
 }
-_COLUMNS = ("CO_MUNICIPIO", "TP_DEPENDENCIA", *STAGES.values())
+_COLUMNS = ("CO_MUNICIPIO", "TP_DEPENDENCIA", "CO_ENTIDADE", "NO_ENTIDADE", *STAGES.values())
 _MEMBERS = ("MICRODADOS_ED_BASICA_", "TABELA_MATRICULA_")
 
 
@@ -63,10 +63,22 @@ class Counts:
     enrollment: dict[str, int] = field(default_factory=_zeros)
 
 
+@dataclass(slots=True, frozen=True)
+class School:
+    """Escola pública com as matrículas por etapa, para a lista do município."""
+
+    code: int
+    name: str
+    municipality: str
+    network: str
+    enrollment: dict[str, int]
+
+
 @dataclass(slots=True)
 class Census:
     year: int
     municipalities: dict[str, Counts] = field(default_factory=dict)
+    schools: list[School] = field(default_factory=list)
 
 
 def _int(value: str) -> int:
@@ -101,15 +113,21 @@ def _rows(archive: zipfile.ZipFile) -> Iterator[list[str]]:
             yield [row[index] for index in indexes]
 
 
-def read_census(path: Path, year: int) -> Census:
+def read_census(path: Path, year: int, *, schools: bool = False) -> Census:
+    """Somas por município e etapa; com `schools`, também cada escola (só o último ano)."""
     census = Census(year=year)
     try:
         with zipfile.ZipFile(path) as archive:
-            for municipality, network, *enrollment in _rows(archive):
+            for municipality, network, code, name, *enrollment in _rows(archive):
                 values = dict(zip(STAGES, map(_int, enrollment), strict=True))
-                if network not in PUBLIC_NETWORKS or values["all"] <= 0:
+                if network not in NETWORKS or values["all"] <= 0:
                     continue
-                counts = census.municipalities.setdefault(municipality.strip(), Counts())
+                municipality = municipality.strip()
+                if schools:
+                    census.schools.append(
+                        School(int(code), name.strip(), municipality, NETWORKS[network], values)
+                    )
+                counts = census.municipalities.setdefault(municipality, Counts())
                 for stage, value in values.items():
                     if value > 0:
                         counts.schools[stage] += 1

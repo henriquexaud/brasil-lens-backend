@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_session
 from app.api.http import etag_matches
 from app.schemas.education import (
+    BasicSchools,
+    BasicStage,
     EducationInstitutionDetail,
     EducationKind,
     EducationNetwork,
@@ -56,3 +58,17 @@ async def institution(
     year: str = "latest",
 ) -> Response:
     return conditional(request, await service.get_institution(session, code, year))
+
+
+@router.get(
+    "/schools/{code}",
+    response_model=BasicSchools,
+    summary="Escolas públicas da educação básica no município, na etapa pedida",
+)
+async def schools(
+    request: Request,
+    session: Session,
+    code: str,
+    stage: BasicStage = "all",
+) -> Response:
+    return conditional(request, await service.get_schools(session, code, stage))

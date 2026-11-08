@@ -54,6 +54,35 @@ class EducationInstitution(Base):
     )
 
 
+class BasicSchool(Base):
+    """Escola pública da educação básica no Censo Escolar mais recente (ADR-23).
+
+    Só o último ano: a tabela serve a lista de escolas do município, não séries.
+    As matrículas por etapa decidem em que lista a escola aparece.
+    """
+
+    __tablename__ = "basic_schools"
+
+    code: Mapped[int] = mapped_column(Integer, primary_key=True)
+    year: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    territory_id: Mapped[int] = mapped_column(
+        ForeignKey("territories.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    network: Mapped[str] = mapped_column(String(16), nullable=False)
+    enrollment: Mapped[int] = mapped_column(Integer, nullable=False)
+    early_childhood_enrollment: Mapped[int] = mapped_column(Integer, nullable=False)
+    elementary_enrollment: Mapped[int] = mapped_column(Integer, nullable=False)
+    high_school_enrollment: Mapped[int] = mapped_column(Integer, nullable=False)
+    dataset_id: Mapped[int] = mapped_column(
+        SmallInteger, ForeignKey("datasets.id", ondelete="RESTRICT"), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint("network IN ('federal', 'state', 'municipal')", name="network"),
+    )
+
+
 class EducationOffer(Base):
     """Cursos presenciais de graduação de uma instituição num município."""
 

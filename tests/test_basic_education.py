@@ -15,20 +15,20 @@ from app.providers import inep_basic_education as inep
 
 # Ordem real das colunas é outra e há centenas delas; o leitor acha cada uma pelo nome.
 HEADER = (
-    "NU_ANO_CENSO;CO_MUNICIPIO;CO_ENTIDADE;TP_DEPENDENCIA;QT_MAT_INF;QT_MAT_BAS;"
+    "NU_ANO_CENSO;CO_MUNICIPIO;CO_ENTIDADE;NO_ENTIDADE;TP_DEPENDENCIA;QT_MAT_INF;QT_MAT_BAS;"
     "QT_MAT_INF_PRE;QT_MAT_FUND;QT_MAT_MED"
 )
 ROWS = [
     # Municipal com educação infantil (40 na creche e 60 na pré-escola, que o leitor
     # ignora), estadual com fundamental e médio, federal com médio.
-    "2024;3106200;1;3;100;300;60;200;",
-    "2024;3106200;2;2;0;900;0;500;400",
-    "2024;3106200;3;1;;20;;;20",
+    "2024;3106200;1; EMEI SOL ;3;100;300;60;200;",
+    "2024;3106200;2;EE LUA;2;0;900;0;500;400",
+    "2024;3106200;3;CEFET;1;;20;;;20",
     # Escola sem matrícula na educação básica (só atividade complementar) não conta.
-    "2024;3106200;4;3;;0;;;",
+    "2024;3106200;4;EM VAZIA;3;;0;;;",
     # Privada, inclusive conveniada, fica de fora.
-    "2024;3106200;5;4;80;80;;;",
-    "2024;3143302;6;3;;150;;150;",
+    "2024;3106200;5;CRECHE PRIVADA;4;80;80;;;",
+    "2024;3143302;6;EM CAMPO;3;;150;;150;",
 ]
 
 
@@ -57,14 +57,37 @@ def test_census_counts_public_schools_by_municipality_and_stage(tmp_path, member
         {"all": 3, "early_childhood": 1, "elementary": 2, "high_school": 2},
         {"all": 1220, "early_childhood": 100, "elementary": 700, "high_school": 420},
     )
+    # Sem pedir, a lista de escolas não é montada (só o último ano precisa dela).
+    assert census.schools == []
     # Município sem educação infantil pública ainda entra, com zero nela.
     assert census.municipalities["3143302"] == _counts(
         {"all": 1, "elementary": 1}, {"all": 150, "elementary": 150}
     )
 
 
+def test_census_keeps_each_public_school_when_asked(tmp_path):
+    path = school_zip(tmp_path, "Tabela_Matricula_2025_V2.csv", ROWS)
+    schools = inep.read_census(path, 2025, schools=True).schools
+    assert [(item.code, item.name, item.network) for item in schools] == [
+        (1, "EMEI SOL", "municipal"),
+        (2, "EE LUA", "state"),
+        (3, "CEFET", "federal"),
+        (6, "EM CAMPO", "municipal"),
+    ]
+    assert schools[0].municipality == "3106200"
+    assert schools[1].enrollment == {
+        "all": 900,
+        "early_childhood": 0,
+        "elementary": 500,
+        "high_school": 400,
+    }
+
+
 def test_census_with_missing_column_is_a_provider_error(tmp_path):
-    header = "NU_ANO_CENSO;CO_MUNICIPIO;TP_DEPENDENCIA;QT_MAT_BAS;QT_MAT_INF_CRE;QT_MAT_FUND"
+    header = (
+        "NU_ANO_CENSO;CO_MUNICIPIO;CO_ENTIDADE;NO_ENTIDADE;TP_DEPENDENCIA;QT_MAT_BAS;"
+        "QT_MAT_INF_CRE;QT_MAT_FUND"
+    )
     path = school_zip(tmp_path, "microdados_ed_basica_2024.csv", [], header=header)
     with pytest.raises(ProviderError, match="QT_MAT_INF, QT_MAT_MED"):
         inep.read_census(path, 2024)
@@ -84,7 +107,9 @@ def test_census_that_is_not_a_zip_is_a_provider_error(tmp_path):
 
 
 def test_census_without_public_schools_is_a_provider_error(tmp_path):
-    path = school_zip(tmp_path, "microdados_ed_basica_2024.csv", ["2024;3106200;5;4;80;80;;;"])
+    path = school_zip(
+        tmp_path, "microdados_ed_basica_2024.csv", ["2024;3106200;5;CRECHE PRIVADA;4;80;80;;;"]
+    )
     with pytest.raises(ProviderError, match="sem escolas públicas"):
         inep.read_census(path, 2024)
 
@@ -262,12 +287,25 @@ async def test_ingest_downloads_every_year_before_opening_the_transaction(monkey
         yield  # pragma: no cover
 
     monkeypatch.setattr(job.inep, "download", download)
-    monkeypatch.setattr(job.inep, "read_census", lambda path, year: _census(year))
+
+    def read(path, year, *, schools=False):
+        events.append(f"read {year}{' com escolas' if schools else ''}")
+        return _census(year)
+
+    monkeypatch.setattr(job.inep, "read_census", read)
     monkeypatch.setattr(job, "fetch_population", population)
     monkeypatch.setattr(job, "job_session", session)
     with pytest.raises(RuntimeError):
         await job.ingest([2025, 2021], tmp_path)
-    assert events == ["download 2021", "download 2025", "ibge", "transaction"]
+    # Só o último ano monta a lista de escolas.
+    assert events == [
+        "download 2021",
+        "read 2021",
+        "download 2025",
+        "read 2025 com escolas",
+        "ibge",
+        "transaction",
+    ]
 
 
 async def test_ingest_before_2022_does_not_ask_ibge_for_population(monkeypatch, tmp_path):
@@ -283,7 +321,7 @@ async def test_ingest_before_2022_does_not_ask_ibge_for_population(monkeypatch, 
         yield  # pragma: no cover
 
     monkeypatch.setattr(job.inep, "download", download)
-    monkeypatch.setattr(job.inep, "read_census", lambda path, year: _census(year))
+    monkeypatch.setattr(job.inep, "read_census", lambda path, year, **_: _census(year))
     monkeypatch.setattr(job, "fetch_population", population)
     monkeypatch.setattr(job, "job_session", session)
     with pytest.raises(RuntimeError, match="parar aqui"):
@@ -306,3 +344,114 @@ async def test_basic_education_ingestion_renews_the_indicator_cache_version(sess
         )
     ).scalar_one()
     assert await repository.version(session) == str(run)
+
+
+@pytest.fixture
+async def schools(session):
+    """Um município fictício com três escolas; nada é confirmado, a sessão desfaz."""
+    from sqlalchemy import text
+
+    from app.services import education as service
+
+    service.clear_cache()
+    await session.execute(
+        text(
+            "INSERT INTO territories (level, ibge_code, name) VALUES ('country', 'BR', 'Brasil') "
+            "ON CONFLICT (ibge_code) DO NOTHING"
+        )
+    )
+    parent = "(SELECT id FROM territories WHERE ibge_code = :parent)"
+    for level, code, name, parent_code in [
+        ("region", "8", "Região Teste", "BR"),
+        ("state", "88", "UF Teste", "8"),
+        ("municipality", "8800001", "Cidade Teste", "88"),
+    ]:
+        await session.execute(
+            text(
+                "INSERT INTO territories (level, ibge_code, name, parent_id) "
+                f"VALUES (:level, :code, :name, {parent})"
+            ),
+            {"level": level, "code": code, "name": name, "parent": parent_code},
+        )
+    dataset = await session.execute(
+        text(
+            "INSERT INTO datasets (source, code, name) VALUES ('inep', 'teste/escolas', 'Teste') "
+            "RETURNING id"
+        )
+    )
+    census = inep.Census(year=2025)
+    stages = ("all", "early_childhood", "elementary", "high_school")
+    for code, name, network, enrollment in [
+        (1, "EMEI SOL", "municipal", (100, 100, 0, 0)),
+        (2, "EE LUA", "state", (900, 0, 500, 400)),
+        (3, "EM ESTRELA", "municipal", (300, 50, 250, 0)),
+        # Município fora da malha: fica sem lista.
+        (4, "EM LONGE", "municipal", (10, 10, 0, 0)),
+    ]:
+        municipality = "8800009" if code == 4 else "8800001"
+        census.schools.append(
+            inep.School(
+                code, name, municipality, network, dict(zip(stages, enrollment, strict=True))
+            )
+        )
+    assert await job.replace_schools(session, census, dataset.scalar_one()) == 3
+    return session
+
+
+@pytest.mark.db
+async def test_schools_of_a_municipality_follow_the_stage_by_enrollment(schools):
+    import orjson
+
+    from app.services import education as service
+
+    body = orjson.loads(await service.get_schools(schools, "8800001", "all"))
+    assert (body["name"], body["year"], body["stage"]) == ("Cidade Teste", 2025, "all")
+    assert [(item["name"], item["enrollment"]) for item in body["schools"]] == [
+        ("EE LUA", 900),
+        ("EM ESTRELA", 300),
+        ("EMEI SOL", 100),
+    ]
+    assert body["schools"][0] == {
+        "code": 2,
+        "name": "EE LUA",
+        "network": "state",
+        "enrollment": 900,
+    }
+    infant = orjson.loads(await service.get_schools(schools, "8800001", "early_childhood"))
+    assert [(item["code"], item["enrollment"]) for item in infant["schools"]] == [(1, 100), (3, 50)]
+    high = orjson.loads(await service.get_schools(schools, "8800001", "high_school"))
+    assert [item["code"] for item in high["schools"]] == [2]
+
+
+@pytest.mark.db
+async def test_schools_exist_only_for_municipalities(schools):
+    from app.core.errors import InvalidParameterError, TerritoryNotFoundError
+    from app.services import education as service
+
+    with pytest.raises(InvalidParameterError, match="só por município"):
+        await service.get_schools(schools, "88", "all")
+    with pytest.raises(TerritoryNotFoundError):
+        await service.get_schools(schools, "8800009", "all")
+
+
+@pytest.mark.db
+async def test_schools_route_validates_the_stage(schools):
+    from httpx import ASGITransport, AsyncClient
+
+    from app.api.deps import get_session
+    from app.main import app
+
+    async def override():
+        yield schools
+
+    app.dependency_overrides[get_session] = override
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            ok = await client.get("/api/v1/education/schools/8800001?stage=elementary")
+            assert ok.status_code == 200
+            assert [item["code"] for item in ok.json()["schools"]] == [2, 3]
+            assert ok.headers["cache-control"] == "public, max-age=300"
+            wrong = await client.get("/api/v1/education/schools/8800001?stage=daycare")
+            assert wrong.status_code == 422
+    finally:
+        app.dependency_overrides.pop(get_session, None)

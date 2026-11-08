@@ -2,7 +2,8 @@
 
 O mapa pinta as matrículas pelo motor de indicadores (`context=education`);
 aqui ficam a lista de instituições de um recorte e o detalhe de cada uma, lidos
-das tabelas do Censo já ingeridas, sem consultar o INEP no request.
+das tabelas do Censo já ingeridas, sem consultar o INEP no request. A aba Básica
+(ADR-23) tem só a lista de escolas públicas de um município.
 """
 
 from __future__ import annotations
@@ -18,6 +19,9 @@ from app.providers.inep_higher_education import KINDS
 from app.repositories import education as repo
 from app.schemas.common import to_json
 from app.schemas.education import (
+    BasicSchools,
+    BasicSchoolSummary,
+    BasicStage,
     EducationCampus,
     EducationInstitutionDetail,
     EducationInstitutionSummary,
@@ -151,6 +155,36 @@ async def get_institution(session: AsyncSession, code: int, year: str) -> bytes:
                 graduates=item.graduates,
             )
             for item in campuses
+        ],
+    )
+    body = to_json(result)
+    _cache.set(key, body)
+    return body
+
+
+async def get_schools(session: AsyncSession, code: str, stage: BasicStage) -> bytes:
+    version = await repo.fetch_basic_version(session)
+    key = f"schools:{version}:{code}:{stage}"
+    cached = _cache.get(key)
+    if cached is not None:
+        return cached
+    territory = await repo.fetch_territory(session, code)
+    if territory is None:
+        raise TerritoryNotFoundError(code)
+    # No Brasil são 137 mil escolas e numa UF, milhares: a lista só ajuda no município.
+    if territory.level != "municipality":
+        raise InvalidParameterError("A lista de escolas existe só por município.", parameter="code")
+    rows = await repo.fetch_schools(session, territory.id, stage)
+    result = BasicSchools(
+        code=territory.ibge_code,
+        name=territory.name,
+        year=rows[0].year if rows else None,
+        stage=stage,
+        schools=[
+            BasicSchoolSummary(
+                code=row.code, name=row.name, network=row.network, enrollment=row.enrollment
+            )
+            for row in rows
         ],
     )
     body = to_json(result)
