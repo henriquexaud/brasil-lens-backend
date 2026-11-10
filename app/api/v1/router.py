@@ -9,6 +9,7 @@ from app.api.v1 import (
     health,
     hydrography,
     notifications,
+    places,
     political,
     socioeconomic,
     territories,
@@ -32,3 +33,4 @@ api_router.include_router(fire_hotspots.router)
 api_router.include_router(deforestation_alerts.router)
 api_router.include_router(transport.router)
 api_router.include_router(education.router)
+api_router.include_router(places.router)

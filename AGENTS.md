@@ -17,6 +17,7 @@ Antes de mudar comportamento, leia [docs/invariants.md](docs/invariants.md). Vis
 | transporte: `providers/dnit.py`, `providers/bc250.py`, `providers/shapefile.py`, `jobs/import_transport*.py`, `services/transport.py`, `scripts/transport_tiles/` | [docs/geography.md](docs/geography.md) e os ADR-17 e 18 em [docs/decisions.md](docs/decisions.md) |
 | navegação: `providers/osm_routing.py`, `services/routing.py` | ADR-24 em [docs/decisions.md](docs/decisions.md) e [docs/architecture.md](docs/architecture.md) |
 | educação: `providers/inep_higher_education.py`, `providers/inep_basic_education.py`, `jobs/import_education.py`, `jobs/import_basic_education.py`, `services/education.py` | [docs/architecture.md](docs/architecture.md) e os ADR-19 e 23 em [docs/decisions.md](docs/decisions.md) |
+| lugares (Fauna e flora, Minérios, Esportes): `providers/ogc.py`, `providers/*_places.py`, `providers/osm_sports.py`, `providers/gbif.py`, `jobs/import_places.py`, `services/places.py`, `services/species.py`, `scripts/sports_places/` | [docs/architecture.md](docs/architecture.md) e o ADR-25 em [docs/decisions.md](docs/decisions.md) |
 | `api/`, `schemas/`, erros, cache (`core/`), fluxo entre repositórios | [docs/architecture.md](docs/architecture.md) e `frontend/src/api/types.ts` |
 | comandos, testes, receitas | [docs/development.md](docs/development.md) |
 | decisão com alternativas reais | [docs/decisions.md](docs/decisions.md) |

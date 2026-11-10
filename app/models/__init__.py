@@ -9,6 +9,7 @@ from app.models.followed_municipality import FollowedMunicipality
 from app.models.indicator import Indicator, IndicatorOrigin, IndicatorValue
 from app.models.ingestion import Dataset, IngestionRun, IngestionStatus
 from app.models.notification import NotificationEvent, PushDelivery, PushSubscription
+from app.models.place import PLACE_CONTEXTS, Place, TerritoryBiome
 from app.models.political import PoliticalCandidate, PoliticalRelease, PoliticalResult
 from app.models.territory import (
     EXPECTED_PARENT_LEVEL,
@@ -38,6 +39,7 @@ __all__ = [
     "EDUCATION_CATEGORIES",
     "EDUCATION_ORGANIZATIONS",
     "EXPECTED_PARENT_LEVEL",
+    "PLACE_CONTEXTS",
     "REQUIRES_PARENT",
     "TRANSPORT_LAYERS",
     "BasicSchool",
@@ -52,12 +54,14 @@ __all__ = [
     "IngestionRun",
     "IngestionStatus",
     "NotificationEvent",
+    "Place",
     "PoliticalCandidate",
     "PoliticalRelease",
     "PoliticalResult",
     "PushDelivery",
     "PushSubscription",
     "Territory",
+    "TerritoryBiome",
     "TerritoryGeometry",
     "TerritoryLevel",
     "TransportFeature",

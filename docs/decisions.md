@@ -140,3 +140,38 @@ Cada entrada registra o que foi decidido, por quê e qual o custo. Para uma deci
 *Descartados.* Chamar OSRM e Photon direto do navegador (quebra a invariante 1 e expõe o IP do usuário); Nominatim (sem autocompletar); GraphHopper e ORS hospedados (exigem chave e têm cota diária baixa); um OSRM próprio agora (o extrato do Brasil pede ~10 GB de RAM para pré-processar, sem necessidade enquanto o uso é baixo).
 
 *Custos.* Os servidores públicos podem ficar lentos ou fora do ar e não têm garantia de serviço; a rota de bicicleta e a pé da FOSSGIS é para uso moderado. A duração é a do perfil do OSRM, sem trânsito. A posição do aparelho fica no navegador; só os pontos da rota passam pela API, que não os guarda além do cache.
+
+**ADR-25 — Fauna e flora, Minérios e Esportes: lugares numa tabela só, do território pintado ao ponto (2026-11-10).** O dono pediu três contextos novos, só com fontes confiáveis, sem encher a tela: tudo aparece aos poucos conforme o mapa aproxima. Os três têm a mesma forma de dado, **feições com posição** (um ponto, às vezes com contorno), e não um número por município. Duplicar tabelas, rotas e telas por contexto seria o desperdício que o ADR-15 evitou nos indicadores.
+
+*Fontes.*
+- **Biomas:** limites do IBGE 1:250.000, lidos do WFS do TerraBrasilis/INPE (`prodes-brasil-nb:biomas_brasil`, seis polígonos).
+- **Unidades de conservação:** CNUC/MMA no GeoServer da INDE (`MMA:cnuc_26_07_31`, 3.406 unidades ativas das três esferas, com grupo, categoria, área e biomas).
+- **Cavernas:** CANIE/ICMBio na INDE (`ICMBio:canie_052026_p`, 30,7 mil cavidades).
+- **Lavras:** SIGMINE/ANM (ArcGIS REST), só as fases em que a extração está autorizada (concessão de lavra, lavra garimpeira, licenciamento e registro de extração: 44,7 mil processos). Requerimentos e pesquisa são intenção, não lavra.
+- **Ocorrências minerais:** GeoSGB, do Serviço Geológico do Brasil (ArcGIS REST, 36,5 mil pontos). Entram os 21,6 mil com situação ou importância conhecida; registro "indeterminado" nas duas não diz o que há no ponto.
+- **Campos de petróleo e gás:** GeoANP (WFS `BD_ANP:CAMPOS_PRODUCAO_SIRGAS`, 427 campos).
+- **Espécies:** registros de ocorrência do **GBIF**, sob demanda. O SiBBr (MCTI) é o nó brasileiro da rede e publica nela os dados das instituições do país; a API própria do SiBBr respondia 502 em 2026-11-09. A ameaça é a categoria da Lista Vermelha da IUCN (CR, EN, VU), que o GBIF traz por registro; a lista nacional (ICMBio/SALVE) não tem API aberta.
+- **Esportes:** OpenStreetMap, pelo mesmo extrato da Geofabrik do ADR-18. Não existe cadastro federal de quadras, pistas e piscinas públicas com localização (a MUNIC do IBGE só conta instalações por município, em 2016).
+
+*Desenho.* Migration `0020_places`: tabela `places` (contexto, camada, categoria, categorias extras, nome, resumo, atributos já rotulados em pt-BR e em ordem, peso, código IBGE do município, ponto e, nas camadas de área, contorno simplificado) e `territory_biomes` (parte de cada município e UF em cada bioma). `jobs/import_places` regrava uma camada por transação (falha de uma fonte conserva a anterior e não impede as outras), resolve o município de cada ponto por `ST_Covers` na malha `detail` (invariante 11) e calcula os biomas por interseção com os polígonos subdivididos. As rotas `/places/*` servem os três contextos: `catalog` (camadas, categorias com contagem, fontes e edição), `values` (contagem por UF ou por município de uma UF), `points` (pontos da área, até 2.500, com `truncated`), `areas` (contornos simplificados nas faixas de zoom do Transporte e recortados à área), `items/{id}` (detalhe do clique) e `territories/{code}` (total, categorias, lista e biomas do recorte). O frontend tem uma tela só (`features/places`), configurada por contexto.
+
+*Do longe ao perto.* De longe o território é pintado pela contagem (UFs no Brasil, municípios dentro da UF); a partir do zoom de cada camada (7 a 10) entram os pontos da vista e a pintura sai; do zoom 11 em diante, as ruas dos tiles OSM do ADR-18 dão endereço ao ponto. Camadas de área (biomas, unidades de conservação, campos) não são contadas: o território fica neutro e o desenho é a própria área. Nada tem rótulo permanente; o detalhe vem do clique.
+
+*Honestidade.*
+- A contagem é de **lugares cadastrados** na fonte. No OpenStreetMap ela depende do mapeamento local, e a interface diz isso; por isso não há taxa por habitante.
+- Quadra sem o esporte marcado, piscina sem acesso declarado (quase sempre particular) e qualquer lugar com `access` privado ficam de fora.
+- A quadra poliesportiva é a categoria `multi` e também responde ao filtro de cada esporte que recebe (`extra_categories`): quem procura basquete a encontra.
+- Registro de ocorrência não é inventário: município pouco estudado tem poucos registros. As espécies nunca pintam o mapa, e o painel diz "mais registradas · não é um inventário". Acima de 3 mil espécies (ou no país inteiro) o número de espécies não é informado, só o de registros.
+- O recorte do GBIF usa as divisões do GADM. A unidade vale só quando tem o mesmo nível e o mesmo nome do território; sem ela, a rota responde 404 e o painel não mostra nada.
+- Camada não ingerida responde `total: null` ("Sem dados"), nunca zero.
+
+*Descartados.*
+- **Um conjunto de tabelas e rotas por contexto:** três vezes o código para o mesmo dado.
+- **Motor de indicadores do ADR-15 para as contagens:** exigiria um indicador por camada e categoria (dezenas) e uma série anual que essas fontes não têm; a contagem sai de um `GROUP BY` de dezenas de milissegundos, guardado em cache.
+- **CFEM por município (ANM):** seria o melhor indicador econômico da mineração, mas `app.anm.gov.br/dadosabertos` recusou a conexão nas tentativas de 2026-11-09 e 10. Fica para quando a fonte voltar.
+- **Processos em pesquisa do SIGMINE:** 114 mil polígonos de intenção, que dariam a impressão de mineração onde não há.
+- **Poços da ANP (30,6 mil) e blocos exploratórios:** enchem a tela sem responder a uma pergunta do usuário; os campos de produção bastam.
+- **Overpass para os esportes:** o servidor público estava sem capacidade e os espelhos não responderam; o extrato da Geofabrik já é o caminho do Transporte.
+- **Espécies ingeridas no banco:** são dezenas de milhões de registros que mudam todo dia; a consulta por território com cache de 7 dias resolve.
+
+*Custos.* `places` tem ~272 mil linhas. O contorno das unidades de conservação chega pelo WFS sem simplificação (um polígono passa de 900 KB), então a ingestão do CNUC leva alguns minutos; as outras camadas, segundos a um minuto. A ANM não envia o certificado intermediário da Sectigo (guardado em `providers/certs`, como o da RNP no INEP). Os esportes dependem do extrato de ~2 GB e de Docker, fora do Render. O GBIF é uma dependência externa sob demanda: uma lista nova custa de 4 a ~28 chamadas (4 de contagem e duas por espécie ainda sem nome em cache), com `SourceCooldown` de 60 s na falha.

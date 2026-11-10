@@ -72,6 +72,10 @@ class Settings(BaseSettings):
     photon_url: str = "https://photon.komoot.io"
     routing_http_timeout: float = 15.0
 
+    # Registros de espécies (ADR-25): API pública do GBIF, rede de que o SiBBr é o nó brasileiro.
+    gbif_url: str = "https://api.gbif.org/v1"
+    gbif_http_timeout: float = 20.0
+
     geometry_overview_tolerance: float = 0.005
     geometry_detail_tolerance: float = 0.001
 

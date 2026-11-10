@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import ssl
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -23,8 +24,10 @@ async def http_client(
     base_url: str | None = None,
     *,
     timeout: float | None = None,  # noqa: ASYNC109
+    verify: ssl.SSLContext | bool = True,
 ) -> AsyncIterator[httpx.AsyncClient]:
     async with httpx.AsyncClient(
+        verify=verify,
         base_url=base_url or settings.ibge_base_url,
         timeout=timeout if timeout is not None else settings.ibge_http_timeout,
         follow_redirects=True,
